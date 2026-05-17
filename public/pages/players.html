@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 玩家管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="playersApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">玩家管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="page-title-row">
+                    <div>
+                        <h4>
+                            <i class="bi bi-people-fill text-primary"></i>玩家管理
+                        </h4>
+                        <p class="page-title-sub">查看和管理服务器上的玩家，包括在线玩家、管理员、封禁列表和白名单</p>
+                    </div>
+                </div>
+
+                <div class="players-tabs">
+                    <button class="players-tab-btn" :class="{ active: tab === 'online' }" @click="tab = 'online'; loadOnlinePlayers()"><i class="bi bi-wifi me-1"></i>在线玩家</button>
+                    <button class="players-tab-btn" :class="{ active: tab === 'lists' }" @click="tab = 'lists'; loadListsTab()"><i class="bi bi-list-ul me-1"></i>玩家列表管理</button>
+                </div>
+
+                <div x-show="tab === 'online'">
+                    <div class="filter-bar">
+                        <h5><i class="bi bi-people-fill me-1 text-primary"></i>在线玩家 <span class="player-list-count" x-text="onlinePlayers.length + ' 人'"></span></h5>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-primary btn-sm" @click="loadOnlinePlayers()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+                            <button class="btn btn-outline-success btn-sm" @click="autoRefresh = !autoRefresh" x-html="autoRefresh ? '<i class=\'bi bi-pause-circle me-1\'></i>关闭自动刷新' : '<i class=\'bi bi-repeat me-1\'></i>开启自动刷新'"></button>
+                        </div>
+                    </div>
+                    <div class="online-players-grid" id="online-players-grid">
+                        <div x-show="onlinePlayers.length === 0" class="empty-state" style="grid-column:1/-1;"><i class="bi bi-person-dash"></i><p>暂无在线玩家...</p></div>
+                        <template x-for="p in onlinePlayers" :key="p.name">
+                            <div class="online-player-card">
+                                <div class="online-player-avatar" x-text="(p.name || '?')[0].toUpperCase()"></div>
+                                <div class="online-player-info">
+                                    <div class="online-player-name" x-text="p.name"></div>
+                                    <div class="online-player-meta" x-text="'在线时间: ' + (p.online_time || 0) + '秒'"></div>
+                                </div>
+                                <div class="online-player-actions" x-show="isAdmin">
+                                    <button class="btn btn-sm btn-warning" @click="openKickModal(p.name)">踢出</button>
+                                    <button class="btn btn-sm btn-danger" @click="openBanModal(p.name)">封禁</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div x-show="tab === 'lists'">
+                    <div class="filter-bar">
+                        <h5>玩家列表管理</h5>
+                        <button class="btn btn-outline-primary btn-sm" @click="loadListsTab()"><i class="bi bi-arrow-clockwise me-1"></i>刷新玩家列表</button>
+                    </div>
+                    <div class="player-sub-tabs">
+                        <button class="player-sub-tab-btn" :class="{ active: subTab === 'admins' }" @click="subTab = 'admins'"><i class="bi bi-shield-lock me-1"></i>管理员列表</button>
+                        <button class="player-sub-tab-btn" :class="{ active: subTab === 'bans' }" @click="subTab = 'bans'"><i class="bi bi-slash-circle me-1"></i>封禁列表</button>
+                        <button class="player-sub-tab-btn" :class="{ active: subTab === 'whitelist' }" @click="subTab = 'whitelist'"><i class="bi bi-check-circle me-1"></i>白名单</button>
+                    </div>
+
+                    <div x-show="subTab === 'admins'">
+                        <div class="player-list-section">
+                            <div class="player-list-header"><i class="bi bi-shield-lock me-2 text-primary"></i>管理员列表<span class="player-list-count" x-text="admins.length"></span></div>
+                            <div class="player-list-body">
+                                <span x-show="admins.length === 0" class="text-muted">暂无管理员...</span>
+                                <template x-for="a in admins" :key="a">
+                                    <div class="player-list-item">
+                                        <span x-text="a"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="subTab === 'bans'">
+                        <div class="player-list-section">
+                            <div class="player-list-header"><i class="bi bi-slash-circle me-2 text-danger"></i>封禁玩家列表<span class="player-list-count" x-text="bans.length"></span></div>
+                            <div class="player-list-body">
+                                <span x-show="bans.length === 0" class="text-muted">暂无封禁...</span>
+                                <template x-for="b in bans" :key="b">
+                                    <div class="player-list-item">
+                                        <span x-text="typeof b === 'string' ? b : (b.username || 'unknown')"></span>
+                                        <button class="btn btn-sm btn-success" @click="unbanPlayer(typeof b === 'string' ? b : b.username)">解封</button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="subTab === 'whitelist'">
+                        <div class="player-list-section">
+                            <div class="player-list-header"><i class="bi bi-check-circle me-2 text-success"></i>白名单<span class="player-list-count" x-text="whitelist.length"></span></div>
+                            <div class="player-list-body">
+                                <span x-show="whitelist.length === 0" class="text-muted">暂无白名单...</span>
+                                <template x-for="w in whitelist" :key="w">
+                                    <div class="player-list-item">
+                                        <span x-text="w"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showKickModal" @click.self="showKickModal = false">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 class="modal-title">踢出玩家</h3><button class="modal-close" @click="showKickModal = false">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">玩家名称</label><input type="text" class="form-control" x-model="kickTarget" readonly></div>
+                <div class="form-group"><label class="form-label">原因</label><input type="text" class="form-control" x-model="kickReason" placeholder="踢出原因"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="showKickModal = false">取消</button>
+                <button class="btn btn-warning" @click="doKick()">踢出</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showBanModal" @click.self="showBanModal = false">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 class="modal-title">封禁玩家</h3><button class="modal-close" @click="showBanModal = false">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">玩家名称</label><input type="text" class="form-control" x-model="banTarget" readonly></div>
+                <div class="form-group"><label class="form-label">封禁原因</label><input type="text" class="form-control" x-model="banReason" placeholder="封禁原因"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="showBanModal = false">取消</button>
+                <button class="btn btn-danger" @click="doBan()">封禁</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function playersApp() {
+      return {
+        tab: 'online',
+        subTab: 'admins',
+        isAdmin: false,
+        isLoggedIn: false,
+        onlinePlayers: [],
+        admins: [],
+        bans: [],
+        whitelist: [],
+        autoRefresh: false,
+        autoRefreshTimer: null,
+        showKickModal: false,
+        showBanModal: false,
+        kickTarget: '',
+        kickReason: '',
+        banTarget: '',
+        banReason: '',
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          var userInfo = TokenManager.getUserInfo();
+          if (!token) { window.location.href = 'login.html'; return; }
+          this.isAdmin = userInfo?.role === 'admin';
+          this.isLoggedIn = true;
+          this.loadOnlinePlayers();
+
+          var self = this;
+          this.autoRefreshTimer = setInterval(function() {
+            if (self.autoRefresh) self.loadOnlinePlayers();
+          }, 10000);
+        },
+
+        async loadOnlinePlayers() {
+          try {
+            var res = await fetch('/api/players/online', { headers: this.authHeaders() });
+            var data = await res.json();
+            var raw = (data.success && data.data?.players) ? data.data.players : [];
+            this.onlinePlayers = raw.map(function(p) {
+              return typeof p === 'string' ? { name: p, online_time: 0 } : p;
+            });
+          } catch(e) { this.showToast('获取在线玩家失败', 'error'); }
+        },
+
+        async loadListsTab() {
+          this.loadAdmins();
+          this.loadBans();
+          this.loadWhitelist();
+        },
+
+        async loadAdmins() {
+          try {
+            var res = await fetch('/api/players/admins', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.admins = (data.success && data.data) ? data.data : [];
+          } catch(e) { this.showToast('获取管理员列表失败', 'error'); }
+        },
+
+        async loadBans() {
+          try {
+            var res = await fetch('/api/players/bans', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.bans = (data.success && data.data) ? data.data : [];
+          } catch(e) { this.showToast('获取封禁列表失败', 'error'); }
+        },
+
+        async loadWhitelist() {
+          try {
+            var res = await fetch('/api/players/whitelist', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.whitelist = (data.success && data.data) ? data.data : [];
+          } catch(e) { this.showToast('获取白名单失败', 'error'); }
+        },
+
+        openKickModal(name) { this.kickTarget = name; this.kickReason = ''; this.showKickModal = true; },
+        openBanModal(name) { this.banTarget = name; this.banReason = ''; this.showBanModal = true; },
+
+        async doKick() {
+          try {
+            var res = await fetch('/api/players/kick', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ player: this.kickTarget, reason: this.kickReason })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '玩家已踢出' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.showKickModal = false; this.loadOnlinePlayers(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async doBan() {
+          try {
+            var res = await fetch('/api/players/ban', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ player: this.banTarget, reason: this.banReason })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '玩家已封禁' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.showBanModal = false; this.loadOnlinePlayers(); this.loadBans(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async unbanPlayer(name) {
+          var confirmed = await window.showConfirm({ content: '确定要解封 ' + name + ' 吗？' });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/players/unban', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ player: name })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '已解封' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadBans();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

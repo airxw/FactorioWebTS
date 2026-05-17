@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 商城</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="shopApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">商城</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click="loadItems()">刷新商品</button>
+                    <button class="btn btn-sm btn-info" @click="openRequestModal()">请求物品</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="shop-layout">
+                    <div class="shop-products">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h3 class="card-title">商品列表</h3>
+                                <div class="shop-header-controls">
+                                    <label class="shop-price-toggle" title="显示/隐藏价格">
+                                        <input type="checkbox" x-model="showPrice" @change="savePricePref()">
+                                        <span>显示价格</span>
+                                    </label>
+                                    <select x-model="selectedCategory" @change="filterByCategory()" class="form-control" style="max-width:160px;">
+                                        <option value="">全部分类</option>
+                                        <template x-for="c in categories" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="item-grid">
+                                    <div x-show="displayItems.length === 0" class="loading">暂无商品</div>
+                                    <template x-for="item in displayItems" :key="item.id">
+                                        <div class="shop-item" :class="{ 'item-disabled': !item.enabled }">
+                                            <div class="shop-item-row">
+                                                <div class="shop-item-name" x-text="item.name_cn || item.code"></div>
+                                                <div class="shop-item-category"><span class="badge bg-secondary" x-text="catLabel(item.category)"></span></div>
+                                            </div>
+                                            <div class="shop-item-row">
+                                                <div class="shop-item-code"><code x-text="item.code"></code></div>
+                                                <div class="shop-item-price" x-text="item.price > 0 ? '¥' + item.price : '免费'" x-show="showPrice"></div>
+                                            </div>
+                                            <button class="btn btn-primary shop-item-btn" @click="addToCart(item)" :disabled="!item.enabled">加入购物车</button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cart-panel">
+                        <div class="card mb-4">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h3 class="card-title" style="margin:0;">购物车</h3>
+                                <button class="btn btn-sm btn-danger" @click="cart = []; syncCart()" x-show="cart.length > 0">清空</button>
+                            </div>
+                            <div class="card-body">
+                                <div x-show="cart.length === 0" class="cart-empty">
+                                    <div style="font-size:32px;margin-bottom:8px;">🛒</div>
+                                    <div>购物车是空的</div>
+                                </div>
+                                <template x-for="(ci,idx) in cart" :key="idx">
+                                    <div class="cart-item">
+                                        <div>
+                                            <strong x-text="ci.item.name_cn || ci.item.code"></strong>
+                                            <div class="text-muted" style="font-size:12px;" x-text="'x' + ci.quantity + (ci.quality > 0 ? ' | 品质Lv.' + ci.quality : '')"></div>
+                                        </div>
+                                        <div class="cart-quantity-controls">
+                                            <button class="btn btn-sm btn-secondary" @click="ci.quantity > 1 ? ci.quantity-- : cart.splice(idx,1); syncCart()">-</button>
+                                            <span x-text="ci.quantity"></span>
+                                            <button class="btn btn-sm btn-secondary" @click="ci.quantity++; syncCart()">+</button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <div class="card-footer" x-show="cart.length > 0">
+                                <button class="btn btn-primary w-100" @click="openCheckout()">去结账</button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title" style="margin:0;">VIP信息</h3></div>
+                            <div class="card-body" id="vip-info-container">
+                                <div x-show="vipLevels.length > 0">
+                                    <template x-for="vl in vipLevels" :key="vl.id">
+                                        <div class="shop-item-row">
+                                            <strong style="color:var(--primary-color);" x-text="vl.name"></strong>
+                                            <div class="shop-item-detail" x-text="'每日限购: ' + (vl.daily_purchase_limit === -1 ? '无限' : vl.daily_purchase_limit) + ' | 单次限购: ' + (vl.single_purchase_limit === -1 ? '无限' : vl.single_purchase_limit)"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div x-show="vipLevels.length === 0" class="loading">暂无VIP等级</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="card-header d-flex justify-content-between align-items-center mb-3">
+                        <h3 class="card-title">我的订单</h3>
+                        <div>
+                            <select x-model="orderStatusFilter" @change="loadOrders()" class="form-control" style="max-width:200px;display:inline-block;">
+                                <option value="">全部状态</option>
+                                <option value="pending">待处理</option>
+                                <option value="processing">处理中</option>
+                                <option value="delivered">已发货</option>
+                                <option value="cancelled">已取消</option>
+                                <option value="failed">失败</option>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" @click="loadOrders()" style="margin-left:8px;">刷新</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>订单号</th><th>商品</th><th>数量</th><th>品质</th><th>玩家</th><th>总价</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <tr x-show="orders.length === 0"><td colspan="9" class="text-center">暂无订单</td></tr>
+                                    <template x-for="o in orders" :key="o.order_id || o.order_number">
+                                        <tr>
+                                            <td><code x-text="o.order_number || '-'"></code></td>
+                                            <td x-text="o.item_name"></td>
+                                            <td x-text="o.quantity"></td>
+                                            <td x-text="o.quality_level ?? '-'"></td>
+                                            <td x-text="o.player_name"></td>
+                                            <td x-text="'¥' + (o.total_price || 0)"></td>
+                                            <td><span class="badge" :class="orderStatusClass(o.status)" x-text="orderStatusText(o.status)"></span></td>
+                                            <td x-text="formatTs(o.created_at)"></td>
+                                            <td>
+                                                <button class="btn btn-sm btn-danger" @click="cancelOrder(o.order_id)" x-show="o.status === 'pending'">取消</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showCheckout" @click.self="showCheckout = false" :style="{ display: showCheckout ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3>确认订单</h3><button class="modal-close" @click="showCheckout = false">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">领取方式</label>
+                    <div class="delivery-options">
+                        <label class="delivery-option"><input type="radio" value="direct" x-model="deliveryMode" checked><span>直接发送到游戏</span></label>
+                        <label class="delivery-option"><input type="radio" value="pickup" x-model="deliveryMode"><span>游戏内取货码</span></label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">游戏角色名</label>
+                    <input type="text" class="form-control" x-model="playerName" placeholder="请输入游戏中你的角色名" required>
+                </div>
+                <div class="checkout-summary">
+                    <div class="price-summary-row">总价 <span class="price-total" x-text="'¥' + cartTotal"></span></div>
+                    <div class="price-summary-row">商品数 <span x-text="cart.length"></span></div>
+                </div>
+                <div x-show="checkoutError" class="text-danger" style="margin-bottom:var(--spacing-md);font-size:var(--font-size-sm);" x-text="checkoutError"></div>
+                <button class="btn btn-primary w-100" @click="submitCheckout()" :disabled="submitting">
+                    <span x-show="!submitting">提交订单</span>
+                    <span x-show="submitting">提交中...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showRequestModal" @click.self="showRequestModal = false" :style="{ display: showRequestModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3>请求物品</h3><button class="modal-close" @click="showRequestModal = false">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">选择物品</label>
+                    <select class="form-control" x-model="requestItemId">
+                        <option value="">-- 请选择物品 --</option>
+                        <template x-for="item in items" :key="item.id">
+                            <option :value="item.id" x-text="(item.name_cn || item.code) + ' (' + item.code + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">游戏角色名</label>
+                    <input type="text" class="form-control" x-model="requestPlayerName" placeholder="请输入你的游戏角色名" required>
+                </div>
+                <div class="form-row" style="display:flex;gap:var(--spacing-md);">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">数量</label>
+                        <input type="number" class="form-control" x-model="requestQuantity" min="1" max="999">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">品质等级</label>
+                        <select class="form-control" x-model="requestQuality">
+                            <option value="1">普通</option>
+                            <option value="2">稀有</option>
+                            <option value="3">史诗</option>
+                            <option value="4">传说</option>
+                            <option value="5">神话</option>
+                        </select>
+                    </div>
+                </div>
+                <div x-show="requestError" class="text-danger" style="margin-bottom:var(--spacing-md);font-size:var(--font-size-sm);" x-text="requestError"></div>
+                <button class="btn btn-primary w-100" @click="submitItemRequest()" :disabled="requestSubmitting">
+                    <span x-show="!requestSubmitting">提交请求</span>
+                    <span x-show="requestSubmitting">提交中...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function shopApp() {
+      return {
+        items: [],
+        categories: [],
+        selectedCategory: '',
+        showPrice: localStorage.getItem('shop_show_price') !== 'false',
+        cart: [],
+        orders: [],
+        orderStatusFilter: '',
+        vipLevels: [],
+        showCheckout: false,
+        deliveryMode: 'direct',
+        playerName: '',
+        checkoutError: '',
+        submitting: false,
+        syncing: false,
+        showRequestModal: false,
+        requestItemId: '',
+        requestQuantity: 1,
+        requestQuality: 1,
+        requestPlayerName: '',
+        requestError: '',
+        requestSubmitting: false,
+
+        async syncCart() {
+          if (this.syncing) return;
+          this.syncing = true;
+          try {
+            var body = JSON.stringify({
+              items: this.cart.map(function(ci) {
+                return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality || 1 };
+              })
+            });
+            await fetch('/api/cart', {
+              method: 'PUT',
+              headers: this.authHeaders('application/json'),
+              body: body
+            });
+          } catch(e) {}
+          finally { this.syncing = false; }
+        },
+
+        async fetchCart() {
+          try {
+            var res = await fetch('/api/cart', { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success && Array.isArray(data.data)) {
+              this.cart = data.data.map(function(item) {
+                return {
+                  item: {
+                    id: item.item_id,
+                    name_cn: item.name_cn || item.name,
+                    code: item.code,
+                    price: item.price,
+                    category: item.category,
+                    enabled: true
+                  },
+                  quantity: item.quantity,
+                  quality: item.quality_level
+                };
+              });
+            }
+          } catch(e) {}
+        },
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          if (!token) { window.location.href = 'login.html'; return; }
+          this.fetchCart();
+          this.loadItems();
+          this.loadOrders();
+          this.loadVipLevels();
+        },
+
+        get displayItems() {
+          if (!this.selectedCategory) return this.items.filter(function(i) { return i.enabled; });
+          return this.items.filter(function(i) { return i.enabled && i.category === this.selectedCategory; }.bind(this));
+        },
+
+        get cartTotal() {
+          return this.cart.reduce(function(sum, ci) { return sum + (ci.item.price || 0) * ci.quantity; }, 0);
+        },
+
+        async loadItems() {
+          try {
+            var res = await fetch('/api/shop/items', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.items = (data.success && data.data) ? data.data : [];
+            var cats = {};
+            this.items.forEach(function(i) { if (i.category) cats[i.category] = true; });
+            this.categories = Object.keys(cats);
+          } catch(e) {}
+        },
+
+        async loadOrders() {
+          try {
+            var url = '/api/shop/orders/my';
+            if (this.orderStatusFilter) url += '?status=' + this.orderStatusFilter;
+            var res = await fetch(url, { headers: this.authHeaders() });
+            var data = await res.json();
+            this.orders = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+        },
+
+        async loadVipLevels() {
+          try {
+            var res = await fetch('/api/vip/levels');
+            var data = await res.json();
+            this.vipLevels = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+        },
+
+        addToCart(item) {
+          var existing = this.cart.find(function(ci) { return ci.item.id === item.id; });
+          if (existing) { existing.quantity++; }
+          else { this.cart.push({ item: item, quantity: 1, quality: item.quality_level || 0 }); }
+          this.syncCart();
+          this.showToast('已加入购物车', 'success');
+        },
+
+        openCheckout() {
+          if (this.cart.length === 0) { this.showToast('购物车为空', 'warning'); return; }
+          this.showCheckout = true;
+          this.checkoutError = '';
+        },
+
+        async submitCheckout() {
+          if (!this.playerName.trim()) { this.checkoutError = '请输入游戏角色名'; return; }
+          this.submitting = true;
+          this.checkoutError = '';
+
+          try {
+            if (this.cart.length === 1) {
+              var ci = this.cart[0];
+              var res = await fetch('/api/shop/orders', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({
+                  items: [{ item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality, player_name: this.playerName }],
+                  delivery_mode: this.deliveryMode
+                })
+              });
+              var data = await res.json();
+              if (data.success) {
+                this.showToast('订单提交成功！订单号: ' + data.data.order_number, 'success');
+                this.showCheckout = false; this.cart = []; this.playerName = ''; this.loadOrders();
+                this.syncCart();
+              } else { this.checkoutError = data.error || '提交失败'; }
+            } else {
+              var items = this.cart.map(function(ci) { return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality, player_name: this.playerName }; });
+              var res = await fetch('/api/shop/orders/batch', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({ items: items, delivery_mode: this.deliveryMode })
+              });
+              var data = await res.json();
+              if (data.success) {
+                this.showToast('批量订单提交成功！共 ' + data.data.item_count + ' 件商品', 'success');
+                this.showCheckout = false; this.cart = []; this.playerName = ''; this.loadOrders();
+                this.syncCart();
+              } else { this.checkoutError = data.error || '提交失败'; }
+            }
+          } catch(e) { this.checkoutError = '网络错误: ' + e.message; }
+          finally { this.submitting = false; }
+        },
+
+        async cancelOrder(id) {
+          var confirmed = await window.showConfirm({ title: '取消订单', content: '确定取消这个订单吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/shop/orders/' + id + '/cancel', { method: 'POST', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '订单已取消' : (data.error || '取消失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadOrders();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        openRequestModal() {
+          this.requestItemId = '';
+          this.requestQuantity = 1;
+          this.requestQuality = 1;
+          this.requestPlayerName = localStorage.getItem('shop_player_name') || '';
+          this.requestError = '';
+          this.showRequestModal = true;
+        },
+
+        async submitItemRequest() {
+          if (!this.requestItemId) { this.requestError = '请选择要请求的物品'; return; }
+          if (!this.requestPlayerName.trim()) { this.requestError = '请输入游戏角色名'; return; }
+          this.requestSubmitting = true;
+          this.requestError = '';
+
+          try {
+            var res = await fetch('/api/shop/item-requests', {
+              method: 'POST',
+              headers: this.authHeaders('application/json'),
+              body: JSON.stringify({
+                item_id: parseInt(this.requestItemId),
+                player_name: this.requestPlayerName.trim(),
+                quantity: parseInt(this.requestQuantity) || 1,
+                quality_level: parseInt(this.requestQuality) || 1,
+              })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast('物品请求已提交，请等待管理员审批', 'success');
+              this.showRequestModal = false;
+              if (this.requestPlayerName.trim()) {
+                localStorage.setItem('shop_player_name', this.requestPlayerName.trim());
+              }
+            } else {
+              this.requestError = data.error || '提交失败，请重试';
+            }
+          } catch (e) {
+            this.requestError = '网络错误: ' + e.message;
+          } finally {
+            this.requestSubmitting = false;
+          }
+        },
+
+        catLabel(c) {
+          var map = { logistics:'物流', production:'生产', combat:'战斗', intermediate:'中间品', 'space-age':'太空时代', equipment:'装备', other:'其他' };
+          return map[c] || c || '其他';
+        },
+
+        savePricePref() {
+          localStorage.setItem('shop_show_price', this.showPrice ? 'true' : 'false');
+        },
+
+        orderStatusClass(s) {
+          var map = { pending:'badge-info', processing:'badge-warning', delivered:'badge-success', cancelled:'badge-danger', failed:'badge-danger' };
+          return map[s] || 'badge-info';
+        },
+
+        orderStatusText(s) {
+          var map = { pending:'待处理', processing:'处理中', delivered:'已发货', cancelled:'已取消', failed:'失败' };
+          return map[s] || s;
+        },
+
+        formatTs(ts) {
+          if (!ts) return '-';
+          return new Date(ts * 1000).toLocaleString('zh-CN');
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

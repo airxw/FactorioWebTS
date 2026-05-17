@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 控制台</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body class="dashboard-page" x-data="dashboardApp()" x-init="init()" @refresh-requested.window="refreshAll()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">控制台</div>
+                <div class="top-nav-actions">
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click="refreshAll()">刷新状态</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content stagger-children">
+                <div class="card">
+                    <div class="card-header"><h2 class="card-title">服务端状态</h2></div>
+                    <div class="card-body">
+                        <div class="status-card-content">
+                            <div class="status-display">
+                                <div class="status-info">
+                                    <div id="server-status" class="status-indicator" :class="statusClass" x-text="serverStatus"></div>
+                                    <div class="status-version" x-text="'版本: ' + (serverVersion || '未知')"></div>
+                                </div>
+                                <div class="status-actions" x-show="isAdmin">
+                                    <button class="btn btn-primary" @click="startServer()" :disabled="isRunning">
+                                        <i class="bi bi-play-fill"></i> 启动
+                                    </button>
+                                    <button class="btn btn-danger" @click="stopServer()" :disabled="!isRunning">
+                                        <i class="bi bi-stop-fill"></i> 停止
+                                    </button>
+                                    <button class="btn btn-secondary" @click="saveGame()" :disabled="!isRunning">
+                                        <i class="bi bi-save"></i> 保存
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title">当前版本信息</h3>
+                        <button class="btn btn-sm btn-primary" @click="checkVersion()">
+                            <i class="bi bi-arrow-clockwise"></i> 检查更新
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="version-info-card">
+                            <div class="version-display">
+                                <div class="version-item">
+                                    <div class="version-item-label">当前版本</div>
+                                    <div class="version-item-value" x-text="currentVersion"></div>
+                                </div>
+                                <div class="version-item">
+                                    <div class="version-item-label">状态</div>
+                                    <div class="version-item-badge" x-text="versionStatusText" :class="versionStatusClass"></div>
+                                </div>
+                            </div>
+                            <div class="update-section" x-html="versionInfo"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title">已安装版本列表</h3>
+                        <button class="btn btn-sm btn-secondary" @click="loadVersionList()">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="version-list-table">
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>版本号</th><th>类型</th><th>安装日期</th><th>状态</th><th x-show="isAdmin">操作</th></tr></thead>
+                                    <tbody id="version-list-body">
+                                        <tr x-show="!versionsLoaded" class="loading-state">
+                                            <td colspan="5" class="text-center">加载中...</td>
+                                        </tr>
+                                        <tr x-show="versionsLoaded && versions.length === 0" class="empty-state">
+                                            <td colspan="5" class="text-center">暂无安装的版本</td>
+                                        </tr>
+                                        <template x-for="v in versions" :key="v.version">
+                                            <tr>
+                                                <td><span class="version-tag" :class="{ 'version-current': v.is_current }" x-text="v.version"></span></td>
+                                                <td x-text="v.release_type"></td>
+                                                <td x-text="formatTs(v.installed_at)"></td>
+                                                <td>
+                                                    <span class="badge" :class="v.is_current ? 'badge-success' : 'badge-secondary'" x-text="v.is_current ? '当前' : '已安装'"></span>
+                                                </td>
+                                                <td x-show="isAdmin">
+                                                    <div class="table-actions">
+                                                        <button class="btn btn-sm btn-primary" @click="setDefault(v.version)" x-show="!v.is_current">
+                                                            <i class="bi bi-check"></i> 设为默认
+                                                        </button>
+                                                        <button class="btn btn-sm btn-warning" @click="verifyVer(v.version)">
+                                                            <i class="bi bi-shield-check"></i> 验证
+                                                        </button>
+                                                        <button class="btn btn-sm btn-danger" @click="deleteVer(v.version)" x-show="!v.is_current">
+                                                            <i class="bi bi-trash"></i> 删除
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function dashboardApp() {
+      return {
+        serverStatus: '加载中...',
+        serverVersion: '',
+        isRunning: false,
+        isAdmin: false,
+        currentVersion: '未知',
+        versionStatusText: '未知',
+        versionStatusClass: '',
+        versionInfo: '',
+        versions: [],
+        versionsLoaded: false,
+        installVersionInp: '',
+        latestVersion: null,
+        statusClass: 'status-loading',
+
+        init() {
+          window.__dashboardInstance = this;
+          SidebarMenu.initSidebarWithPermission();
+          this.checkAuth();
+        },
+
+        checkAuth() {
+          var token = TokenManager.getToken();
+          if (!token) { window.location.href = 'login.html'; return; }
+
+          var userInfo = TokenManager.getUserInfo();
+          if (userInfo) {
+            this.isAdmin = userInfo.role === 'admin';
+          }
+
+          fetch('/api/auth/validate', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.json())
+            .then(d => {
+              if (d.success && d.data) {
+                this.isAdmin = d.data.role === 'admin';
+                TokenManager.setUserInfo(d.data);
+                this.refreshAll();
+              } else {
+                TokenManager.clear();
+                window.location.href = 'login.html';
+              }
+            });
+        },
+
+        refreshAll() {
+          this.loadServerStatus();
+          this.loadCurrentVersion();
+          this.loadVersionList();
+        },
+
+        async loadServerStatus() {
+          try {
+            var res = await fetch('/api/server/status', {
+              headers: this.authHeaders()
+            });
+            var data = await res.json();
+            if (data.success && data.data) {
+              this.isRunning = data.data.running || false;
+              this.serverStatus = this.isRunning ? '运行中' : '已停止';
+              this.serverVersion = data.data.version || '';
+              this.statusClass = this.isRunning ? 'status-online' : 'status-offline';
+            }
+          } catch(e) { /* ignore */ }
+        },
+
+        async loadCurrentVersion() {
+          try {
+            var res = await fetch('/api/versions/current', { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success && data.data) {
+              this.currentVersion = data.data.version || '未知';
+              if (data.data.installed_at && data.data.installed_at > 0) {
+                this.versionStatusText = '已安装';
+                this.versionStatusClass = 'badge-success';
+              } else {
+                this.versionStatusText = '未安装';
+                this.versionStatusClass = 'badge-danger';
+              }
+            } else {
+              this.currentVersion = '未知';
+              this.versionStatusText = '未知';
+              this.versionStatusClass = '';
+            }
+          } catch(e) { 
+            this.currentVersion = '未知';
+            this.versionStatusText = '错误';
+            this.versionStatusClass = 'badge-danger';
+          }
+        },
+
+        async loadVersionList() {
+          this.versionsLoaded = false;
+          try {
+            var res = await fetch('/api/versions', { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success) {
+              this.versions = Array.isArray(data.data) ? data.data : [];
+            } else {
+              this.versions = [];
+            }
+          } catch(e) { 
+            this.versions = [];
+          } finally {
+            this.versionsLoaded = true;
+          }
+        },
+
+        async checkVersion() {
+          try {
+            var res = await fetch('/api/versions/latest-all', { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success && data.data) {
+              this.latestVersion = data.data;
+              
+              var html = '';
+              
+              var hasAnyUpdate = data.data.stable.has_update || data.data.experimental.has_update;
+              
+              if (hasAnyUpdate) {
+                html += '<div class="update-badge badge-warning"><i class="bi bi-exclamation-triangle-fill"></i> 有可用更新</div>';
+              } else {
+                html += '<div class="update-badge badge-success"><i class="bi bi-check-circle-fill"></i> 已是最新版本</div>';
+              }
+              
+              html += '<div class="update-buttons">';
+              
+              var stableBtnClass = data.data.stable.has_update ? 'btn-primary' : 'btn-success';
+              var stableText = data.data.stable.has_update ? '安装正式版 ' + data.data.stable.version : '正式版 ' + data.data.stable.version;
+              var stableDisabled = data.data.stable.has_update ? '' : 'disabled';
+              
+              html += '<button class="btn ' + stableBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'stable\')" ' + stableDisabled + '>'
+                + '<i class="bi bi-check-circle-fill"></i> ' + stableText
+                + '</button>';
+              
+              var experimentalBtnClass = data.data.experimental.has_update ? 'btn-warning' : 'btn-info';
+              var experimentalText = data.data.experimental.has_update ? '安装测试版 ' + data.data.experimental.version : '测试版 ' + data.data.experimental.version;
+              var experimentalDisabled = data.data.experimental.has_update ? '' : 'disabled';
+              
+              html += '<button class="btn ' + experimentalBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'experimental\')" ' + experimentalDisabled + '>'
+                + '<i class="bi bi-flask"></i> ' + experimentalText
+                + '</button>';
+              
+              html += '</div>';
+              
+              this.versionInfo = html;
+            }
+          } catch (e) { 
+            this.versionInfo = '<div class="update-badge badge-danger"><i class="bi bi-x-circle-fill"></i> 检查更新失败</div>';
+          }
+        },
+
+        async installVersionByType(releaseType) {
+          var version = releaseType === 'experimental' 
+            ? this.latestVersion?.experimental?.version 
+            : this.latestVersion?.stable?.version;
+            
+          if (!version) {
+            this.showToast('获取版本信息失败', 'error');
+            return;
+          }
+          
+          var typeName = releaseType === 'experimental' ? '测试版' : '正式版';
+          var confirmed = await window.showConfirm({ content: '确定要安装' + typeName + ' ' + version + ' 吗？' });
+          if (!confirmed) return;
+          
+          try {
+            var res = await fetch('/api/versions/upgrade', {
+              method: 'POST',
+              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target_version: version, release_type: releaseType })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast('版本安装中', 'success');
+              setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 3000);
+            } else {
+              this.showToast(data.error || '安装失败', 'error');
+            }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async startServer() {
+          try {
+            var res = await fetch('/api/server/start', {
+              method: 'POST',
+              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ version: this.currentVersion !== '未知' ? this.currentVersion : undefined })
+            });
+            var data = await res.json();
+            if (!data.success) {
+              this.showToast(data.error || '启动失败', 'error');
+              return;
+            }
+            
+            this.showToast('正在启动服务器...', 'info');
+            
+            for (var i = 0; i < 10; i++) {
+              await new Promise(r => setTimeout(r, 1500));
+              await this.loadServerStatus();
+              if (this.isRunning) {
+                this.showToast('服务器启动成功', 'success');
+                return;
+              }
+            }
+            
+            this.showToast('服务器启动超时，请检查日志', 'error');
+          } catch(e) { 
+            this.showToast('启动失败: ' + (e.message || '未知错误'), 'error');
+          }
+        },
+
+        async stopServer() {
+          var confirmed = await window.showConfirm({ title: '停止服务器', content: '确定要停止服务器吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/server/stop', { method: 'POST', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '服务器已停止' : (data.error || '停止失败'), data.success ? 'success' : 'error');
+            this.loadServerStatus();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async saveGame() {
+          try {
+            var res = await fetch('/api/server/save', { method: 'POST', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '游戏已保存' : (data.error || '保存失败'), data.success ? 'success' : 'error');
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async installVersion() {
+          if (!this.installVersionInp) { this.showToast('请输入版本号', 'warning'); return; }
+          var confirmed = await window.showConfirm({ content: '确定要安装版本 ' + this.installVersionInp + ' 吗？' });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/versions/upgrade', {
+              method: 'POST',
+              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target_version: this.installVersionInp, release_type: 'stable' })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast('版本安装中', 'success');
+              this.installVersionInp = '';
+              setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 3000);
+            } else {
+              this.showToast(data.error || '安装失败', 'error');
+            }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async setDefault(version) {
+          var confirmed = await window.showConfirm({ content: '确定要将 ' + version + ' 设为默认版本吗？' });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/versions/set-default', {
+              method: 'POST', headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ version })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '默认版本已设置' : (data.error || '设置失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadVersionList();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async deleteVer(version) {
+          var confirmed = await window.showConfirm({ title: '删除版本', content: '确定要删除版本 ' + version + ' 吗？此操作不可逆！', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/versions/' + encodeURIComponent(version), { method: 'DELETE', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '版本已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadVersionList();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async verifyVer(version) {
+          try {
+            var res = await fetch('/api/versions/verify/' + encodeURIComponent(version), { headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success && data.data?.valid ? '版本验证成功' : (data.data?.message || '验证失败'), data.data?.valid ? 'success' : 'error');
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        authHeaders() {
+          return { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+        },
+
+        formatTs(ts) {
+          if (!ts) return '-';
+          return new Date(ts * 1000).toLocaleString('zh-CN');
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.trae/
+.env
+_memory_
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/saves/
+data/factorio.db
+*.log
+config/.backups/
+config/*.bak.*
+*.zip
+.DS_Store

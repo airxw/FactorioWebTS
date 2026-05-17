@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 配置文件管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+    </head>
+<body x-data="configApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">配置文件管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="card mb-4">
+                    <div class="card-header mb-3"><h3 class="card-title">配置文件类型</h3></div>
+                    <div class="card-body">
+                        <div class="popup-hint" style="margin-bottom:16px;">
+                            <i class="bi bi-info-circle me-1"></i>
+                            此页面管理 Factorio 服务器的所有配置文件。
+                            <a href="server-control.html">前往服务器控制 →</a> 选择 <strong>server-settings.json</strong> 用于启动
+                        </div>
+                        <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--spacing-lg);">
+                            <template x-for="ct in fileTypes" :key="ct.key">
+                                <div class="config-type-card" :class="{ active: activeConfig === ct.key }" @click="selectConfig(ct.key)">
+                                    <div class="config-type-icon" x-text="ct.icon"></div>
+                                    <div class="config-type-name" x-text="ct.name"></div>
+                                    <div class="config-type-desc" x-text="ct.desc"></div>
+                                    <span class="config-card-badge" :class="configExists(ct.key) ? 'badge-exists' : 'badge-missing'" x-text="configFileStatus(ct.key)" style="display:block;margin-top:6px;font-size:0.75rem;"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4" x-show="activeConfig">
+                    <div class="card-header d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center gap-3">
+                            <h3 class="card-title" x-text="'编辑: ' + activeConfigName()">编辑: 服务器设置</h3>
+                            <div class="btn-group">
+                                <button class="btn btn-sm" :class="editorMode === 'visual' ? 'btn-primary' : 'btn-outline-secondary'" @click="switchEditorMode('visual')">
+                                    <i class="bi bi-pencil-square me-1"></i>可视化
+                                </button>
+                                <button class="btn btn-sm" :class="editorMode === 'json' ? 'btn-primary' : 'btn-outline-secondary'" @click="switchEditorMode('json')">
+                                    <i class="bi bi-braces me-1"></i>JSON
+                                </button>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-warning" @click="toggleBackupPanel()">
+                                <i class="bi bi-clock-history me-1"></i><span x-text="showBackupPanel ? '收起备份' : '备份历史 (' + (backups.length || 0) + ')'"></span>
+                            </button>
+                            <select x-model="selectedTemplate" class="form-control" style="max-width:180px;">
+                                <option value="">加载模板...</option>
+                                <template x-for="tp in templates" :key="tp.id">
+                                    <option :value="tp.id" x-text="tp.name"></option>
+                                </template>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" @click="loadTemplate()">加载</button>
+                            <button class="btn btn-sm btn-info" @click="validateConfig()">验证配置</button>
+                            <button class="btn btn-sm btn-primary" @click="saveConfig()">保存</button>
+                        </div>
+                    </div>
+
+                    <div x-show="showBackupPanel && activeConfig" class="card-body" style="background:var(--bg-secondary);border-top:1px solid var(--border-color);padding:12px 20px;margin-bottom:0;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 style="margin:0;"><i class="bi bi-clock-history me-1"></i>配置备份历史 <span class="text-muted" style="font-size:12px;" x-text="'(最多保留 20 个)'"></span></h6>
+                            <button class="btn btn-sm btn-outline-danger" @click="cleanupBackups()" x-show="backups.length > 10">
+                                <i class="bi bi-trash me-1"></i>清理旧备份
+                            </button>
+                        </div>
+                        <div x-show="backupsLoading" class="text-muted" style="font-size:13px;">加载中...</div>
+                        <div x-show="!backupsLoading && backups.length === 0" class="text-muted" style="font-size:13px;">暂无备份记录</div>
+                        <div x-show="!backupsLoading && backups.length > 0" class="table-responsive" style="max-height:200px;overflow-y:auto;">
+                            <table class="table table-sm table-hover mb-0" style="font-size:13px;">
+                                <thead><tr><th>时间</th><th>大小</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <template x-for="(bk, idx) in backups" :key="bk.timestamp">
+                                        <tr>
+                                            <td x-text="formatBackupTime(bk.created_at)"></td>
+                                            <td x-text="formatSize(bk.size)"></td>
+                                            <td>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-xs btn-warning" @click="restoreBackup(bk.timestamp)" title="恢复到此版本">
+                                                        <i class="bi bi-arrow-counterclockwise"></i> 恢复
+                                                    </button>
+                                                    <button class="btn btn-xs btn-info" @click="previewBackup(bk.timestamp)" title="查看内容">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card-body">
+                        <div x-show="editorMode === 'visual'" id="visual-editor-wrapper">
+                            <div class="config-editor-toolbar">
+                                <div class="config-tabs" id="visual-editor-tabs" style="display:flex;gap:2px;flex-wrap:wrap;"></div>
+                            </div>
+                            <div class="config-editor-body" id="visual-editor-body"></div>
+                        </div>
+                        <div x-show="editorMode === 'json'">
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted" style="font-size:12px;">直接编辑配置文件内容 (JSON格式)</span>
+                                    <button class="btn btn-sm btn-secondary" @click="formatJson()">格式化 <i class="bi bi-code"></i></button>
+                                </div>
+                                <textarea id="config-textarea" class="config-editor" spellcheck="false" x-model="configContent" @input="onContentChange()" style="width:100%;resize:vertical;"></textarea>
+                            </div>
+                        </div>
+                        <div x-show="editorError" class="config-alert config-alert-error">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i><span x-text="editorError"></span>
+                        </div>
+                        <div class="success-alert" x-show="editorSuccess">
+                            <i class="bi bi-check-circle-fill me-2"></i><span x-text="editorSuccess"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center mb-3">
+                        <h3 class="card-title">配置模板</h3>
+                        <button class="btn btn-sm btn-primary" @click="openCreateTemplate()"><i class="bi bi-plus-lg me-1"></i>创建模板</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>模板名称</th><th>描述</th><th>配置类型</th><th>创建时间</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <tr x-show="templates.length === 0"><td colspan="5" class="text-center">暂无模板</td></tr>
+                                    <template x-for="tp in templates" :key="tp.id">
+                                        <tr>
+                                            <td x-text="tp.name"></td>
+                                            <td x-text="tp.description || '-'"></td>
+                                            <td x-text="tp.config_type || '-'"></td>
+                                            <td x-text="formatTs(tp.created_at)"></td>
+                                            <td>
+                                                <div class="d-flex gap-2">
+                                                    <button class="btn btn-sm btn-primary" @click="applyTemplate(tp.id)">应用</button>
+                                                    <button class="btn btn-sm btn-danger" @click="deleteTemplate(tp.id, tp.name)">删除</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showTemplateModal" @click.self="showTemplateModal = false" :style="{ display: showTemplateModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3>创建配置模板</h3><button class="modal-close" @click="showTemplateModal = false">&times;</button></div>
+            <div class="modal-body">
+                <form @submit.prevent="createTemplate()">
+                    <div class="form-group">
+                        <label class="form-label">模板名称 <span class="required-star">*</span></label>
+                        <input type="text" class="form-control" x-model="templateForm.name" placeholder="例如：默认服务器配置" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">配置类型</label>
+                        <select class="form-control" x-model="templateForm.config_type">
+                            <option value="">-- 当前选中类型 --</option>
+                            <template x-for="ct in fileTypes" :key="ct.key">
+                                <option :value="ct.key" x-text="ct.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">描述</label>
+                        <textarea class="form-control" x-model="templateForm.description" rows="2" placeholder="可选：模板说明"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">配置内容 (复用当前编辑内容)</label>
+                        <div class="text-muted" style="font-size:12px;">将使用当前编辑器中的配置内容作为模板</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">创建模板</button>
+                        <button type="button" class="btn btn-secondary" @click="showTemplateModal = false">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    var CONFIG_FORM_DEFS = {
+      'server-settings.json': {
+        sections: [
+          { id:'basic',title:'基本信息',icon:'info-circle',fields:[
+            { key:'name',label:'服务器名称',type:'text',placeholder:'我的 Factorio 服务器',desc:'在服务器浏览器中显示的名称' },
+            { key:'description',label:'服务器描述',type:'textarea',placeholder:'欢迎来到我的服务器！',desc:'最多 5000 个字符' },
+            { key:'tags',label:'游戏标签',type:'tags',desc:'用于在服务器浏览器中分类和搜索' }
+          ]},
+          { id:'visibility',title:'可见性与认证',icon:'eye',fields:[
+            { key:'visibility.public',label:'公开可见',type:'checkbox',desc:'在公共服务器列表中显示' },
+            { key:'visibility.lan',label:'局域网可见',type:'checkbox',desc:'允许局域网内的玩家发现' },
+            { key:'username',label:'Factorio 账号',type:'text',placeholder:'factorio.com 用户名',desc:'公开服务器必须填写' },
+            { key:'token',label:'认证令牌',type:'password',placeholder:'在 factorio.com/profile 获取',desc:'推荐使用令牌替代密码' },
+            { key:'game_password',label:'游戏密码',type:'text',placeholder:'留空则不设密码' },
+            { key:'require_user_verification',label:'验证用户身份',type:'checkbox',desc:'要求玩家通过 Factorio 账号验证' }
+          ]},
+          { id:'players',title:'玩家与连接',icon:'people',fields:[
+            { key:'max_players',label:'最大玩家数',type:'number',min:0,placeholder:'0',unit:'人',desc:'0 表示无限制' },
+            { key:'ignore_player_limit_for_returning_players',label:'老玩家不限流',type:'checkbox' },
+            { key:'allow_commands',label:'允许指令',type:'select',options:{'admins-only':'仅管理员','true':'所有人','false':'禁用'} },
+            { key:'afk_autokick_interval',label:'AFK 自动踢出',type:'number',min:0,placeholder:'0',unit:'分钟',desc:'0 禁用自动踢出' },
+            { key:'auto_pause',label:'无人时自动暂停',type:'checkbox' },
+            { key:'only_admins_can_pause_the_game',label:'仅管理员可暂停',type:'checkbox' }
+          ]},
+          { id:'network',title:'网络与性能',icon:'speedometer2',fields:[
+            { key:'max_upload_in_kilobytes_per_second',label:'上传限速',type:'number',min:0,placeholder:'0',unit:'KB/s' },
+            { key:'max_upload_slots',label:'上传线程数',type:'number',min:1,placeholder:'5' },
+            { key:'minimum_latency_in_ticks',label:'最小延迟',type:'number',min:0,placeholder:'0',unit:'tick' }
+          ]},
+          { id:'autosave',title:'自动存档',icon:'save',fields:[
+            { key:'autosave_interval',label:'自动存档间隔',type:'number',min:1,placeholder:'10',unit:'分钟' },
+            { key:'autosave_slots',label:'存档槽位数',type:'number',min:1,placeholder:'5' },
+            { key:'autosave_only_on_server',label:'仅服务器存档',type:'checkbox' },
+            { key:'non_blocking_saving',label:'非阻塞保存',type:'checkbox',desc:'保存时不阻塞游戏运行' }
+          ]},
+          { id:'rcon',title:'RCON 设置',icon:'terminal',fields:[
+            { key:'rcon_password',label:'RCON 密码',type:'rcon-password',placeholder:'留空则使用环境变量',desc:'用于远程控制台连接认证' },
+            { key:'rcon_port',label:'RCON 端口',type:'number',min:1024,max:65535,placeholder:'27015',desc:'远程控制台连接端口' }
+          ]}
+        ]
+      },
+      'map-settings.json': {
+        sections: [
+          { id:'basic',title:'基本设置',icon:'globe',fields:[
+            { key:'width',label:'地图宽度',type:'number',min:0,placeholder:'0',unit:'格',desc:'0 表示无限制' },
+            { key:'height',label:'地图高度',type:'number',min:0,placeholder:'0',unit:'格' },
+            { key:'starting_area',label:'起始区域',type:'select',options:{'none':'无','very-low':'非常小','low':'小','normal':'正常','high':'大','very-high':'非常大'} },
+            { key:'peaceful_mode',label:'和平模式',type:'checkbox',desc:'敌人不会主动攻击' }
+          ]},
+          { id:'terrain',title:'地形设置',icon:'tree',fields:[
+            { key:'terrain_segmentation',label:'地形分割',type:'select',options:{'very-low':'非常低','low':'低','normal':'正常','high':'高','very-high':'非常高'} },
+            { key:'water',label:'水域大小',type:'select',options:{'very-low':'非常小','low':'小','normal':'正常','high':'大','very-high':'非常大'} }
+          ]},
+          { id:'pollution',title:'污染设置',icon:'droplet',fields:[
+            { key:'pollution.enabled',label:'启用污染',type:'checkbox' },
+            { key:'pollution.diffusion_ratio',label:'扩散比率',type:'number',step:0.001,min:0,max:1,placeholder:'0.02' },
+            { key:'pollution.min_to_diffuse',label:'最小扩散量',type:'number',step:0.1,min:0,placeholder:'15' }
+          ]},
+          { id:'evolution',title:'进化设置',icon:'graph-up',fields:[
+            { key:'enemy_evolution.enabled',label:'启用进化',type:'checkbox' },
+            { key:'enemy_evolution.time_factor',label:'时间因子',type:'number',step:0.000001,min:0,placeholder:'0.000004' },
+            { key:'enemy_evolution.destroy_factor',label:'摧毁因子',type:'number',step:0.00001,min:0,placeholder:'0.002' },
+            { key:'enemy_evolution.pollution_factor',label:'污染因子',type:'number',step:0.000001,min:0,placeholder:'0.000015' }
+          ]},
+          { id:'expansion',title:'敌人扩张',icon:'arrow-expand',fields:[
+            { key:'enemy_expansion.enabled',label:'启用扩张',type:'checkbox' },
+            { key:'enemy_expansion.max_expansion_distance',label:'最大扩张距离',type:'number',min:1,placeholder:'7',unit:'区块' },
+            { key:'enemy_expansion.min_expansion_cooldown',label:'最小冷却',type:'number',min:0,placeholder:'14400',unit:'tick' },
+            { key:'enemy_expansion.max_expansion_cooldown',label:'最大冷却',type:'number',min:0,placeholder:'216000',unit:'tick' }
+          ]}
+        ]
+      },
+      'server-adminlist.json': { sections:[{ id:'admins',title:'管理员列表',icon:'person-badge',fields:[{ key:'_list',label:'管理员用户名',type:'stringlist',desc:'每行一个 Factorio 用户名' }] }] },
+      'server-banlist.json': { sections:[{ id:'bans',title:'封禁列表',icon:'slash-circle',fields:[{ key:'_list',label:'封禁条目',type:'banlist',desc:'管理服务器的封禁记录' }] }] },
+      'server-whitelist.json': { sections:[{ id:'whitelist',title:'白名单',icon:'check-circle',fields:[{ key:'_list',label:'白名单用户名',type:'stringlist',desc:'仅列表中的玩家可以加入' }] }] },
+      'mod-list.json': { sections:[{ id:'mods',title:'Mod 列表',icon:'puzzle',fields:[{ key:'_list',label:'Mod 配置',type:'modlist',desc:'管理服务器的 Mod 启用状态' }] }] }
+    };
+
+    function configApp() {
+      console.log('🔧 [DEBUG] configApp() 函数开始执行');
+      try {
+      console.log('🔧 [DEBUG] try 块开始');
+      var appData = {
+        fileTypes: [
+          { key: 'server-settings', name: '服务器设置', desc: '端口、玩家数、密码等', icon: '⚙️', filename: 'server-settings.json' },
+          { key: 'map-settings', name: '地图设置', desc: '地形生成、难度、虫群等地图参数', icon: '🗺️', filename: 'map-settings.json', merged: true },
+          { key: 'mod-list', name: '模组列表', desc: '启用的模组清单', icon: '📦', filename: 'mod-list.json' },
+          { key: 'server-adminlist', name: '管理员', desc: '管理员名单', icon: '🛡️', filename: 'server-adminlist.json' },
+          { key: 'server-banlist', name: '封禁名单', desc: '禁用玩家列表', icon: '🚫', filename: 'server-banlist.json' },
+          { key: 'server-whitelist', name: '白名单', desc: '允许访问的玩家', icon: '✅', filename: 'server-whitelist.json' }
+        ],
+        activeConfig: null,
+        configContent: '',
+        configOriginal: '',
+        configFiles: [],
+        templates: [],
+        selectedTemplate: '',
+        editorError: '',
+        editorSuccess: '',
+        showTemplateModal: false,
+        templateForm: { name: '', config_type: '', description: '' },
+        editorMode: 'visual',
+        visualData: null,
+        visualActiveSection: '',
+        configFileName: '',
+        backups: [],
+        showBackupPanel: false,
+        backupsLoading: false,
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          var userInfo = TokenManager.getUserInfo();
+          if (!token) { window.location.href = 'login.html'; return; }
+          if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(function callee() { window.location.href = 'dashboard.html'; }, 1500); return; }
+          this.loadConfigFiles();
+          this.loadTemplates();
+        },
+
+        activeConfigName() {
+          var ft = this.fileTypes.find(function(t) { return t.key === this.activeConfig; }.bind(this));
+          return ft ? ft.name : (this.activeConfig || '');
+        },
+
+        async loadConfigFiles() {
+          try {
+            var res = await fetch('/api/config/files', { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success && data.data) { this.configFiles = data.data.files || []; }
+          } catch(e) {}
+        },
+
+        configExists(key) {
+          if (key === 'map-settings') {
+            return this.configFiles.some(function(f) { return f.filename === 'map-gen-settings.json' && f.exists; }) &&
+                   this.configFiles.some(function(f) { return f.filename === 'map-settings.json' && f.exists; });
+          }
+          var ft = this.fileTypes.find(function(t) { return t.key === key; });
+          if (!ft) return false;
+          return this.configFiles.some(function(f) { return f.filename === ft.filename && f.exists; });
+        },
+
+        configFileStatus(key) {
+          if (key === 'map-settings') {
+            var genExists = this.configFiles.some(function(f) { return f.filename === 'map-gen-settings.json' && f.exists; });
+            var mapExists = this.configFiles.some(function(f) { return f.filename === 'map-settings.json' && f.exists; });
+            if (genExists && mapExists) return '已存在';
+            if (genExists || mapExists) return '部分存在';
+            return '未创建';
+          }
+          return this.configExists(key) ? '已存在' : '未创建';
+        },
+
+        async selectConfig(key) {
+          var prevConfig = this.activeConfig;
+          var isSameConfig = key === prevConfig;
+          
+          this.activeConfig = key;
+          this.editorError = '';
+          this.editorSuccess = '';
+          this.editorMode = 'visual';
+          var ft = this.fileTypes.find(function(t) { return t.key === key; });
+          this.configFileName = ft ? ft.filename : (key + '.json');
+
+          // 如果是同一配置，并且已有数据，先从表单收集当前数据，再渲染（不重新从服务器拉取）
+          if (isSameConfig && this.visualData && Object.keys(this.visualData).length > 0) {
+            try {
+              // 先收集当前表单数据，保持最新状态
+              var currentData = this.collectVisualData();
+              this.visualData = currentData;
+              this.configContent = JSON.stringify(currentData, null, 2);
+            } catch(e) {
+            }
+            this.renderVisualForm();
+            return;
+          }
+
+          if (key === 'map-settings') {
+            try {
+              var res1 = await fetch('/api/config/get?file_type=map-gen-settings', { headers: this.authHeaders() });
+              var data1 = await res1.json();
+              var genData = {};
+              if (data1.success && data1.data && data1.data.content !== null && data1.data.content !== undefined) {
+                var raw1 = typeof data1.data.content === 'string' ? data1.data.content : JSON.stringify(data1.data.content, null, 2);
+                try { genData = JSON.parse(raw1); } catch(e) { genData = {}; }
+              }
+
+              var res2 = await fetch('/api/config/get?file_type=map-settings', { headers: this.authHeaders() });
+              var data2 = await res2.json();
+              var mapData = {};
+              if (data2.success && data2.data && data2.data.content !== null && data2.data.content !== undefined) {
+                var raw2 = typeof data2.data.content === 'string' ? data2.data.content : JSON.stringify(data2.data.content, null, 2);
+                try { mapData = JSON.parse(raw2); } catch(e) { mapData = {}; }
+              }
+
+              var merged = {};
+              for (var k in genData) { if (genData.hasOwnProperty(k)) merged[k] = genData[k]; }
+              for (var k in mapData) { if (mapData.hasOwnProperty(k)) merged[k] = mapData[k]; }
+              this.visualData = merged;
+              this.configContent = JSON.stringify(merged, null, 2);
+            } catch(e) { this.configContent = '{}'; this.visualData = {}; }
+            this.configOriginal = this.configContent;
+            this.renderVisualForm();
+            return;
+          }
+
+          try {
+            var res = await fetch('/api/config/get?file_type=' + encodeURIComponent(key), { headers: this.authHeaders() });
+            var data = await res.json();
+            var parsed = {};
+            if (data.success && data.data && data.data.content !== null && data.data.content !== undefined) {
+              var raw = typeof data.data.content === 'string' ? data.data.content : JSON.stringify(data.data.content, null, 2);
+              try { parsed = JSON.parse(raw); } catch(e) { parsed = {}; }
+              this.configContent = raw;
+            } else {
+              this.configContent = '{}';
+            }
+            this.configOriginal = this.configContent;
+            this.visualData = parsed;
+            this.renderVisualForm();
+          } catch(e) { this.configContent = '{}'; this.configOriginal = '{}'; this.visualData = {}; }
+        },
+
+        onContentChange() {
+          this.editorError = '';
+          this.editorSuccess = '';
+        },
+
+        switchEditorMode(mode) {
+          this.editorMode = mode;
+          if (mode === 'visual') {
+            try { this.visualData = JSON.parse(this.configContent.trim()); } catch(e) { this.visualData = JSON.parse(this.configOriginal.trim() || '{}'); }
+            this.renderVisualForm();
+          }
+          if (mode === 'json') {
+            try {
+              var vd = this.collectVisualData();
+              this.configContent = JSON.stringify(vd, null, 2);
+            } catch(e) {}
+          }
+        },
+
+        getFormDef() {
+          var fn = this.configFileName;
+          if (CONFIG_FORM_DEFS[fn]) return CONFIG_FORM_DEFS[fn];
+          return { sections: [{ id:'json',title:'JSON',icon:'braces',fields:[{ key:'_raw',label:'配置',type:'rawjson',desc:'无可视化编辑器' }] }] };
+        },
+
+        renderVisualForm() {
+          var self = this;
+          var bodyEl = document.getElementById('visual-editor-body');
+          if (!bodyEl) return;
+          var formDef = this.getFormDef();
+          self.visualActiveSection = formDef.sections[0].id;
+          bodyEl.innerHTML = '';
+
+          var tabsEl = document.getElementById('visual-editor-tabs');
+          if (tabsEl) {
+            tabsEl.innerHTML = '';
+            formDef.sections.forEach(function(sec, idx) {
+              var tab = document.createElement('button');
+              tab.className = 'config-tab' + (idx === 0 ? ' active' : '');
+              tab.textContent = sec.title;
+              tab.onclick = function() { self.switchVisualSection(sec.id); };
+              tabsEl.appendChild(tab);
+            });
+          }
+
+          formDef.sections.forEach(function(section) {
+            var secEl = document.createElement('div');
+            secEl.className = 'config-section';
+            secEl.id = 'vs-' + section.id;
+            secEl.style.display = (section.id === self.visualActiveSection) ? 'block' : 'none';
+
+            var header = document.createElement('div');
+            header.className = 'config-section-header';
+            header.innerHTML = '<i class="bi bi-' + section.icon + '"></i><span class="config-section-title">' + section.title + '</span>';
+            secEl.appendChild(header);
+
+            section.fields.forEach(function(field) {
+              var fieldEl = document.createElement('div');
+              fieldEl.className = 'config-field';
+
+              if (field.type !== 'checkbox') {
+                var label = document.createElement('div');
+                label.className = 'config-field-label';
+                label.textContent = field.label;
+                fieldEl.appendChild(label);
+              }
+
+              var value = getNestedValue(self.visualData, field.key);
+
+              switch (field.type) {
+                case 'text':
+                  fieldEl.dataset.fieldKey = field.key;
+                  var inp = document.createElement('input'); inp.type='text';
+                  inp.placeholder = field.placeholder || '';
+                  inp.dataset.fieldKey = field.key;
+                  inp.value = (value !== undefined && value !== null) ? String(value) : '';
+                  fieldEl.appendChild(inp);
+                  break;
+                case 'textarea':
+                  fieldEl.dataset.fieldKey = field.key;
+                  var ta = document.createElement('textarea'); ta.rows = 3;
+                  ta.placeholder = field.placeholder || '';
+                  ta.dataset.fieldKey = field.key;
+                  ta.value = (value !== undefined && value !== null) ? String(value) : '';
+                  fieldEl.appendChild(ta);
+                  break;
+                case 'password':
+                  var wrap = document.createElement('div'); wrap.style.cssText='display:flex;gap:6px;';
+                  var pw = document.createElement('input'); pw.type='password';
+                  pw.placeholder=field.placeholder||''; pw.dataset.fieldKey=field.key;
+                  pw.value=(value!==undefined&&value!==null)?String(value):''; pw.style.flex='1';
+                  var tb = document.createElement('button'); tb.type='button';
+                  tb.className='btn btn-sm btn-outline-secondary';
+                  tb.innerHTML='<i class="bi bi-eye"></i>';
+                  tb.onclick=function(){ if(pw.type==='password'){pw.type='text';tb.innerHTML='<i class="bi bi-eye-slash"></i>';} else {pw.type='password';tb.innerHTML='<i class="bi bi-eye"></i>';} };
+                  wrap.appendChild(pw); wrap.appendChild(tb);
+                  wrap.dataset.fieldKey=field.key; fieldEl.appendChild(wrap);
+                  break;
+                case 'rcon-password':
+                  var wrap = document.createElement('div'); wrap.style.cssText='display:flex;gap:6px;';
+                  var pw = document.createElement('input'); pw.type='password';
+                  pw.placeholder=field.placeholder||''; pw.dataset.fieldKey=field.key;
+                  pw.value=(value!==undefined&&value!==null)?String(value):''; pw.style.flex='1';
+                  var tb = document.createElement('button'); tb.type='button';
+                  tb.className='btn btn-sm btn-outline-secondary';
+                  tb.title='显示/隐藏密码';
+                  tb.innerHTML='<i class="bi bi-eye"></i>';
+                  tb.onclick=function(){ if(pw.type==='password'){pw.type='text';tb.innerHTML='<i class="bi bi-eye-slash"></i>';} else {pw.type='password';tb.innerHTML='<i class="bi bi-eye"></i>';} };
+                  wrap.appendChild(pw); wrap.appendChild(tb);
+                  var genBtn = document.createElement('button'); genBtn.type='button';
+                  genBtn.className='btn btn-sm btn-outline-info';
+                  genBtn.title='随机生成密码';
+                  genBtn.innerHTML='<i class="bi bi-shuffle"></i>';
+                  genBtn.onclick=function(){ var newPwd=generateRandomPassword(16); pw.value=newPwd; };
+                  wrap.appendChild(genBtn);
+                  wrap.dataset.fieldKey=field.key; fieldEl.appendChild(wrap);
+                  break;
+                case 'number':
+                  var nw = document.createElement('div'); nw.className='config-field-num';
+                  nw.dataset.fieldKey=field.key;
+                  var ni = document.createElement('input'); ni.type='number';
+                  ni.min=field.min!==undefined?field.min:null; ni.max=field.max!==undefined?field.max:null;
+                  ni.step=field.step!==undefined?field.step:1; ni.placeholder=field.placeholder||'';
+                  ni.value=(value!==undefined&&value!==null)?value:'';
+                  nw.appendChild(ni);
+                  if(field.unit){var un=document.createElement('span');un.className='config-field-num-unit';un.textContent=field.unit;nw.appendChild(un);}
+                  fieldEl.appendChild(nw);
+                  break;
+                case 'checkbox':
+                  var cw = document.createElement('label'); cw.className='config-check-field';
+                  cw.dataset.fieldKey=field.key;
+                  var cb = document.createElement('input'); cb.type='checkbox'; cb.checked=!!value;
+                  var cl = document.createElement('span'); cl.className='config-check-label'; cl.textContent=field.label;
+                  cw.appendChild(cb); cw.appendChild(cl); fieldEl.appendChild(cw);
+                  break;
+                case 'select':
+                  fieldEl.dataset.fieldKey = field.key;
+                  var sel = document.createElement('select'); sel.dataset.fieldKey=field.key;
+                  var opts = field.options || {};
+                  Object.keys(opts).forEach(function(v){ var o=document.createElement('option');o.value=v;o.textContent=opts[v];if(String(value)===v)o.selected=true;sel.appendChild(o); });
+                  fieldEl.appendChild(sel);
+                  break;
+                case 'tags':
+                  fieldEl.appendChild(createTagsInput(field, value, self.visualData));
+                  break;
+                case 'stringlist':
+                  fieldEl.appendChild(createStringListEditor(field, self.visualData));
+                  break;
+                case 'banlist':
+                  fieldEl.appendChild(createBanListEditor(field, self.visualData));
+                  break;
+                case 'modlist':
+                  fieldEl.appendChild(createModListEditor(field, self.visualData));
+                  break;
+                default:
+                  var msg = document.createElement('div');
+                  msg.style.cssText='padding:12px;text-align:center;color:var(--color-text-secondary);font-size:0.85rem;';
+                  msg.textContent = field.desc || '无可视化编辑';
+                  fieldEl.appendChild(msg);
+              }
+
+              if (field.desc) {
+                var desc = document.createElement('div');
+                desc.className = 'config-field-desc'; desc.textContent = field.desc;
+                fieldEl.appendChild(desc);
+              }
+              secEl.appendChild(fieldEl);
+            });
+            bodyEl.appendChild(secEl);
+          });
+        },
+
+        switchVisualSection(id) {
+          this.visualActiveSection = id;
+          var allSecs = document.querySelectorAll('#visual-editor-body .config-section');
+          allSecs.forEach(function(s) { s.style.display = 'none'; });
+          var tgt = document.getElementById('vs-' + id);
+          if (tgt) tgt.style.display = 'block';
+
+          var allTabs = document.querySelectorAll('#visual-editor-tabs .config-tab');
+          var formDef = this.getFormDef();
+          allTabs.forEach(function(t, idx) {
+            t.classList.toggle('active', formDef.sections[idx] && formDef.sections[idx].id === id);
+          });
+        },
+
+        collectVisualData() {
+          var formDef = this.getFormDef();
+          var rawData = JSON.parse(JSON.stringify(this.visualData || {}));
+          var isList = ['server-adminlist.json','server-banlist.json','server-whitelist.json','mod-list.json'].indexOf(this.configFileName) >= 0;
+
+          if (isList) {
+            var lw = document.querySelector('#visual-editor-body .config-list-editor');
+            if (!lw) return rawData;
+            if (this.configFileName === 'mod-list.json') {
+              var res = [];
+              lw.querySelectorAll('.config-list-item').forEach(function(r) {
+                var ins = r.querySelectorAll('input');
+                var nm = ins[1] ? ins[1].value.trim() : '';
+                var en = ins[0] ? ins[0].checked : true;
+                if (nm) res.push({name:nm,enabled:en});
+              });
+              return res;
+            }
+            if (this.configFileName === 'server-banlist.json') {
+              var res = [];
+              lw.querySelectorAll('.config-list-item').forEach(function(r) {
+                var ins = r.querySelectorAll('input');
+                var un = ins[0] ? ins[0].value.trim() : '';
+                var re = ins[1] ? ins[1].value.trim() : '';
+                if (un) res.push({username:un,reason:re});
+              });
+              return res;
+            }
+            var res = [];
+            lw.querySelectorAll('.config-list-item input[type="text"]').forEach(function(inp) {
+              var v = inp.value.trim(); if (v) res.push(v);
+            });
+            return res;
+          }
+
+          var result = JSON.parse(JSON.stringify(rawData));
+          formDef.sections.forEach(function(section) {
+            section.fields.forEach(function(field) {
+              if (field.type === 'rawjson' || field.key === '_list') return;
+              if (field.type === 'tags') {
+                var tw = document.querySelector('#visual-editor-body [data-field-key="' + field.key + '"]');
+                if (!tw) return;
+                var tags = [];
+                tw.querySelectorAll('.config-tag').forEach(function(t) {
+                  var txt = t.textContent.replace('×','').trim();
+                  if (txt) tags.push(txt);
+                });
+                setNestedValue(result, field.key, tags);
+              } else if (field.type === 'checkbox') {
+                var cw = document.querySelector('#visual-editor-body [data-field-key="' + field.key + '"]');
+                if (!cw) return;
+                var cb = cw.querySelector('input[type="checkbox"]');
+                if (cb) setNestedValue(result, field.key, cb.checked);
+              } else if (field.type === 'number') {
+                var nw = document.querySelector('#visual-editor-body [data-field-key="' + field.key + '"]');
+                if (!nw) return;
+                var ni = nw.querySelector('input[type="number"]');
+                if (!ni) return;
+                var v = ni.value.trim();
+                if (v === '') { deleteNestedValue(result, field.key); }
+                else { var num = parseFloat(v); setNestedValue(result, field.key, Number.isInteger(num) && v.indexOf('.')===-1 ? parseInt(v,10) : num); }
+              } else if (field.type === 'password' || field.type === 'rcon-password') {
+                var pw = document.querySelector('#visual-editor-body [data-field-key="' + field.key + '"] input');
+                if (!pw) return;
+                var v = pw.value.trim();
+                if (v === '') { deleteNestedValue(result, field.key); }
+                else { setNestedValue(result, field.key, v); }
+              } else {
+                var inp = document.querySelector('#visual-editor-body [data-field-key="' + field.key + '"] input:not([type="checkbox"]), #visual-editor-body [data-field-key="' + field.key + '"] textarea, #visual-editor-body [data-field-key="' + field.key + '"] select');
+                if (!inp) return;
+                if (inp.tagName === 'SELECT') { setNestedValue(result, field.key, inp.value); }
+                else {
+                  var v = inp.value.trim();
+                  if (v === '') {
+                    var requiredFields = ['name', 'description', 'rcon_password', 'rcon-port'];
+                    if (requiredFields.indexOf(field.key) >= 0) {
+                      setNestedValue(result, field.key, v);
+                    } else {
+                      deleteNestedValue(result, field.key);
+                    }
+                  } else {
+                    setNestedValue(result, field.key, v);
+                  }
+                }
+              }
+            });
+          });
+          Object.keys(result).forEach(function(k) {
+            var underscoreKey = k.replace(/-/g, '_');
+            if (underscoreKey !== k && underscoreKey in result) {
+              delete result[k];
+            }
+          });
+          return result;
+        },
+
+        async validateConfig() {
+          this.editorError = '';
+          this.editorSuccess = '';
+          if (!this.activeConfig) { this.showToast('请先选择配置类型', 'warning'); return; }
+          var contentStr;
+          if (this.editorMode === 'visual') {
+            contentStr = JSON.stringify(this.collectVisualData(), null, 2);
+          } else {
+            contentStr = this.configContent.trim();
+          }
+          try { JSON.parse(contentStr); } catch(e) { this.editorError = 'JSON格式错误: ' + e.message; return; }
+
+          if (this.activeConfig === 'map-settings') {
+            var allData = JSON.parse(contentStr);
+            var genKeys = ['width','height','starting_area','peaceful_mode','terrain_segmentation','water'];
+            var mapKeys = ['pollution','enemy_evolution','enemy_expansion'];
+            var knownKeys = genKeys.concat(mapKeys);
+            var genData = {};
+            var mapData = {};
+            genKeys.forEach(function(k) { if (k in allData) genData[k] = allData[k]; });
+            mapKeys.forEach(function(k) { if (k in allData) mapData[k] = allData[k]; });
+            Object.keys(allData).forEach(function(k) {
+              if (knownKeys.indexOf(k) === -1) { mapData[k] = allData[k]; }
+            });
+            try {
+              var res1 = await fetch('/api/config/validate', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({ file_type: 'map-gen-settings', content: JSON.stringify(genData, null, 2) })
+              });
+              var d1 = await res1.json();
+              var res2 = await fetch('/api/config/validate', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({ file_type: 'map-settings', content: JSON.stringify(mapData, null, 2) })
+              });
+              var d2 = await res2.json();
+              var allErrors = [];
+              if (d1.success && d1.data && d1.data.errors) allErrors = allErrors.concat(d1.data.errors);
+              if (d2.success && d2.data && d2.data.errors) allErrors = allErrors.concat(d2.data.errors);
+              if (allErrors.length === 0) { this.editorSuccess = '配置验证通过'; }
+              else { this.editorError = '验证失败: ' + allErrors.join(', '); }
+            } catch(e) { this.editorError = '网络错误: ' + e.message; }
+            return;
+          }
+
+          try {
+            var res = await fetch('/api/config/validate', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ file_type: this.activeConfig, content: contentStr })
+            });
+            var data = await res.json();
+            if (data.success && data.data) {
+              if (data.data.valid) { this.editorSuccess = '配置验证通过'; }
+              else { this.editorError = data.data.message || '验证失败'; if (data.data.errors) this.editorError += ': ' + data.data.errors.join(', '); }
+            } else { this.editorError = data.error || '验证请求失败'; }
+          } catch(e) { this.editorError = '网络错误: ' + e.message; }
+        },
+
+        async saveConfig() {
+          this.editorError = '';
+          this.editorSuccess = '';
+          if (!this.activeConfig) { this.showToast('请先选择配置类型', 'warning'); return; }
+          var contentStr;
+          if (this.editorMode === 'visual') {
+            var collectedData = this.collectVisualData();
+            contentStr = JSON.stringify(collectedData, null, 2);
+          } else {
+            contentStr = this.configContent.trim();
+          }
+          try { JSON.parse(contentStr); } catch(e) { this.editorError = 'JSON格式错误: ' + e.message; return; }
+
+          if (this.activeConfig === 'map-settings') {
+            var allData = JSON.parse(contentStr);
+            var genKeys = ['width','height','starting_area','peaceful_mode','terrain_segmentation','water'];
+            var mapKeys = ['pollution','enemy_evolution','enemy_expansion'];
+            var knownKeys = genKeys.concat(mapKeys);
+            var genData = {};
+            var mapData = {};
+            genKeys.forEach(function(k) { if (k in allData) genData[k] = allData[k]; });
+            mapKeys.forEach(function(k) { if (k in allData) mapData[k] = allData[k]; });
+            Object.keys(allData).forEach(function(k) {
+              if (knownKeys.indexOf(k) === -1) { mapData[k] = allData[k]; }
+            });
+            try {
+              var res1 = await fetch('/api/config/save', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({ file_type: 'map-gen-settings', content: JSON.stringify(genData, null, 2) })
+              });
+              var res2 = await fetch('/api/config/save', {
+                method: 'POST', headers: this.authHeaders('application/json'),
+                body: JSON.stringify({ file_type: 'map-settings', content: JSON.stringify(mapData, null, 2) })
+              });
+              var d1 = await res1.json();
+              var d2 = await res2.json();
+              if (d1.success && d2.success) {
+                this.configContent = contentStr;
+                this.configOriginal = contentStr;
+                try { this.visualData = JSON.parse(contentStr); } catch(e) {}
+                this.editorSuccess = '配置已保存 - 可在服务器控制页面的启动配置中使用';
+                this.loadConfigFiles();
+              } else {
+                this.editorError = (d1.error || '') + ' ' + (d2.error || '');
+              }
+            } catch(e) { this.editorError = '网络错误: ' + e.message; }
+            return;
+          }
+
+          try {
+            var res = await fetch('/api/config/save', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ file_type: this.activeConfig, content: contentStr })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.configContent = contentStr;
+              this.configOriginal = contentStr;
+              try { this.visualData = JSON.parse(contentStr); } catch(e) {}
+              this.editorSuccess = '配置已保存 - 可在服务器控制页面的启动配置中使用';
+              this.loadConfigFiles();
+            } else { this.editorError = data.error || '保存失败'; }
+          } catch(e) { this.editorError = '网络错误: ' + e.message; }
+        },
+
+        formatJson() {
+          try {
+            if (this.editorMode === 'visual') {
+              var vd = this.collectVisualData();
+              this.configContent = JSON.stringify(vd, null, 2);
+            }
+            var obj = JSON.parse(this.configContent.trim());
+            this.configContent = JSON.stringify(obj, null, 2);
+          } catch(e) { this.editorError = 'JSON格式错误: ' + e.message; }
+        },
+
+        async loadTemplates() {
+          try {
+            var res = await fetch('/api/config/templates', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.templates = (data.success && data.data && data.data.templates) ? data.data.templates : [];
+          } catch(e) {}
+        },
+
+        async loadTemplate() {
+          if (!this.selectedTemplate) { this.showToast('请选择模板', 'warning'); return; }
+          var tp = this.templates.find(function(t) { return t.id.toString() === this.selectedTemplate.toString(); }.bind(this));
+          if (!tp) { this.showToast('未找到模板', 'error'); return; }
+          if (tp.config_type && tp.config_type !== this.activeConfig) {
+            var confirmed = await window.showConfirm({ title:'提示', content:'模板类型 (' + tp.config_type + ') 与当前编辑类型 (' + this.activeConfig + ') 不一致，确定加载？' });
+            if (!confirmed) return;
+          }
+          try {
+            var config = typeof tp.config_json === 'string' ? JSON.parse(tp.config_json) : (tp.config_json || {});
+            this.configContent = JSON.stringify(config, null, 2);
+            this.visualData = config;
+            if (this.editorMode === 'visual') this.renderVisualForm();
+            this.editorError = '';
+            this.editorSuccess = '模板"' + tp.name + '"已加载';
+            var self = this;
+            setTimeout(function() { self.editorSuccess = ''; }, 3000);
+          } catch(e) { this.editorError = '加载模板失败: ' + e.message; }
+        },
+
+        openCreateTemplate() {
+          if (!this.activeConfig) { this.showToast('请先在上方选择一种配置文件类型', 'warning'); return; }
+          if (this.editorMode === 'visual') {
+            try {
+              var vd = this.collectVisualData();
+              this.configContent = JSON.stringify(vd, null, 2);
+            } catch(e) { this.showToast('无法收集表单数据: ' + e.message, 'error'); return; }
+          }
+          if (!this.configContent.trim()) { this.showToast('当前配置内容为空，无法创建模板', 'warning'); return; }
+          try { JSON.parse(this.configContent.trim()); } catch(e) { this.showToast('当前配置JSON格式错误，无法创建模板', 'error'); return; }
+          this.templateForm = { name: '', config_type: this.activeConfig || '', description: '' };
+          this.showTemplateModal = true;
+        },
+
+        async createTemplate() {
+          if (!this.templateForm.name) { this.showToast('请输入模板名称', 'warning'); return; }
+          var configObj;
+          try { configObj = JSON.parse(this.configContent.trim()); } catch(e) { this.showToast('当前配置JSON格式错误', 'error'); return; }
+          try {
+            var res = await fetch('/api/config/templates', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({
+                name: this.templateForm.name,
+                description: this.templateForm.description,
+                config_type: this.activeConfig,
+                config: JSON.stringify(configObj)
+              })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast('模板创建成功', 'success');
+              this.showTemplateModal = false;
+              this.loadTemplates();
+            } else { this.showToast(data.error || '创建失败', 'error'); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async applyTemplate(id) {
+          var tp = this.templates.find(function(t) { return t.id === id; });
+          if (!tp) return;
+          if (tp.config_type) { this.activeConfig = tp.config_type; }
+          this.selectedTemplate = id.toString();
+          await this.loadTemplate();
+        },
+
+        async deleteTemplate(id, name) {
+          var confirmed = await window.showConfirm({ title: '删除模板', content: '确定删除模板"' + name + '"吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/config/templates/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '模板已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadTemplates();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        formatTs(ts) {
+          if (!ts) return '-';
+          return new Date(ts * 1000).toLocaleString('zh-CN');
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        },
+
+        toggleBackupPanel() {
+          this.showBackupPanel = !this.showBackupPanel;
+          if (this.showBackupPanel && this.activeConfig) {
+            this.loadBackups();
+          }
+        },
+
+        async loadBackups() {
+          if (!this.activeConfig) return;
+          this.backupsLoading = true;
+          try {
+            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig), { headers: this.authHeaders() });
+            var data = await res.json();
+            this.backups = (data.success && data.data && data.data.backups) ? data.data.backups : [];
+          } catch(e) { this.backups = []; }
+          finally { this.backupsLoading = false; }
+        },
+
+        async restoreBackup(timestamp) {
+          var confirmed = await window.showConfirm({
+            title: '恢复备份',
+            content: '确定要恢复到此备份版本吗？当前配置将被覆盖。',
+            danger: true
+          });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/restore', {
+              method: 'POST',
+              headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ timestamp: timestamp })
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast('已恢复到备份版本', 'success');
+              await this.selectConfig(this.activeConfig);
+              this.loadBackups();
+            } else {
+              this.showToast(data.error || '恢复失败', 'error');
+            }
+          } catch(e) { this.showToast('网络错误: ' + e.message, 'error'); }
+        },
+
+        async cleanupBackups() {
+          var confirmed = await window.showConfirm({
+            title: '清理旧备份',
+            content: '将删除超出保留数量（10个）的旧备份，此操作不可撤销。'
+          });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/cleanup', {
+              method: 'DELETE',
+              headers: this.authHeaders()
+            });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast(data.message || '清理完成', 'success');
+              this.loadBackups();
+            } else {
+              this.showToast(data.error || '清理失败', 'error');
+            }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        previewBackup(timestamp) {
+          this.showToast('预览功能开发中...', 'info');
+        },
+
+        formatBackupTime(ts) {
+          if (!ts) return '-';
+          var d = new Date(ts);
+          return d.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        },
+
+        formatSize(bytes) {
+          if (!bytes) return '0 B';
+          if (bytes < 1024) return bytes + ' B';
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+          return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+      };
+      console.log('🔧 [DEBUG] appData 对象创建完成，准备返回');
+      console.log('🔧 [DEBUG] 检查 showBackupPanel 是否存在:', 'showBackupPanel' in appData);
+      console.log('🔧 [DEBUG] appData.showBackupPanel 值:', appData.showBackupPanel);
+      return appData;
+      } catch(e) {
+        console.error('configApp 初始化错误:', e);
+        return {
+          showBackupPanel: false,
+          backups: [],
+          activeConfig: null,
+          init() { console.error('configApp 处于降级模式'); }
+        };
+      }
+    }
+
+    function generateRandomPassword(length) {
+      length = length || 16;
+      var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*_-+=';
+      var result = '';
+      var array = new Uint32Array(length);
+      crypto.getRandomValues(array);
+      for (var i = 0; i < length; i++) {
+        result += chars[array[i] % chars.length];
+      }
+      return result;
+    }
+
+    function getNestedValue(obj, key) {
+      if (!obj) return undefined;
+      if (key === '_list' || key === '_raw') return undefined;
+      var parts = key.split('.');
+      var val = obj;
+      for (var i = 0; i < parts.length; i++) {
+        if (val === null || val === undefined || typeof val !== 'object') return undefined;
+        val = val[parts[i]];
+      }
+      return val;
+    }
+
+    function setNestedValue(obj, key, value) {
+      var parts = key.split('.');
+      var current = obj;
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (!(parts[i] in current) || typeof current[parts[i]] !== 'object' || current[parts[i]] === null) {
+          current[parts[i]] = {};
+        }
+        current = current[parts[i]];
+      }
+      current[parts[parts.length - 1]] = value;
+    }
+
+    function deleteNestedValue(obj, key) {
+      var parts = key.split('.');
+      var current = obj;
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (!(parts[i] in current)) return;
+        current = current[parts[i]];
+      }
+      delete current[parts[parts.length - 1]];
+    }
+
+    function createTagsInput(field, value, configData) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'config-tags-input';
+      wrapper.dataset.fieldKey = field.key;
+      var tags = Array.isArray(value) ? value.slice() : [];
+      function render() {
+        wrapper.querySelectorAll('.config-tag').forEach(function(t) { t.remove(); });
+        var inp = wrapper.querySelector('input');
+        tags.forEach(function(tag, idx) {
+          var te = document.createElement('span'); te.className = 'config-tag';
+          te.innerHTML = tag + '<span class="config-tag-remove">&times;</span>';
+          te.querySelector('.config-tag-remove').onclick = function(e) { e.stopPropagation(); tags.splice(idx,1); render(); };
+          wrapper.insertBefore(te, inp);
+        });
+      }
+      var inp = document.createElement('input'); inp.type='text';
+      inp.placeholder = field.placeholder || '输入后按回车添加';
+      inp.style.cssText = 'border:none!important;outline:none!important;flex:1;min-width:100px;padding:2px 4px!important;background:transparent!important;box-shadow:none!important;';
+      inp.onkeydown = function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); var v=inp.value.trim(); if(v&&tags.indexOf(v)===-1){tags.push(v);render();} inp.value=''; }
+        else if (e.key==='Backspace'&&inp.value===''&&tags.length>0) { tags.pop(); render(); }
+      };
+      wrapper.appendChild(inp); render();
+      wrapper.onclick = function() { inp.focus(); };
+      return wrapper;
+    }
+
+    function createStringListEditor(field, configData) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'config-list-editor';
+      wrapper.dataset.fieldKey = field.key;
+      var items = Array.isArray(configData) ? configData.slice() : [];
+      function render() {
+        wrapper.querySelectorAll('.config-list-item').forEach(function(el) { el.remove(); });
+        items.forEach(function(item, idx) {
+          var row = document.createElement('div'); row.className = 'config-list-item';
+          var inp = document.createElement('input'); inp.type='text';
+          inp.value = String(item); inp.placeholder = '输入用户名';
+          inp.oninput = function() { items[idx] = inp.value; };
+          var rm = document.createElement('button'); rm.className='config-list-item-remove';
+          rm.innerHTML = '<i class="bi bi-x-lg"></i>';
+          rm.onclick = function() { items.splice(idx,1); render(); };
+          row.appendChild(inp); row.appendChild(rm);
+          wrapper.appendChild(row);
+        });
+      }
+      var ar = document.createElement('div'); ar.className='config-list-add';
+      var ab = document.createElement('button'); ab.className='config-list-add-btn';
+      ab.innerHTML = '<i class="bi bi-plus"></i> 添加用户';
+      ab.onclick = function() { items.push(''); render(); };
+      ar.appendChild(ab);
+      render(); wrapper.appendChild(ar);
+      return wrapper;
+    }
+
+    function createBanListEditor(field, configData) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'config-list-editor';
+      wrapper.dataset.fieldKey = field.key;
+      var items = Array.isArray(configData) ? configData.slice() : [];
+      function render() {
+        wrapper.querySelectorAll('.config-list-item').forEach(function(el) { el.remove(); });
+        items.forEach(function(item, idx) {
+          var row = document.createElement('div'); row.className = 'config-list-item';
+          var uname = typeof item === 'string' ? item : (item.username || '');
+          var reason = typeof item === 'object' ? (item.reason || '') : '';
+          var ni = document.createElement('input'); ni.type='text'; ni.value=uname; ni.placeholder='用户名'; ni.style.width='35%';
+          ni.oninput = function() { if(typeof items[idx]==='string')items[idx]={username:uname,reason:reason}; items[idx].username=ni.value; };
+          var ri = document.createElement('input'); ri.type='text'; ri.value=reason; ri.placeholder='封禁原因'; ri.style.flex='1';
+          ri.oninput = function() { if(typeof items[idx]==='string')items[idx]={username:uname,reason:reason}; items[idx].reason=ri.value; };
+          var rm = document.createElement('button'); rm.className='config-list-item-remove';
+          rm.innerHTML = '<i class="bi bi-x-lg"></i>';
+          rm.onclick = function() { items.splice(idx,1); render(); };
+          row.appendChild(ni); row.appendChild(ri); row.appendChild(rm);
+          wrapper.appendChild(row);
+        });
+      }
+      var ar = document.createElement('div'); ar.className='config-list-add';
+      var ab = document.createElement('button'); ab.className='config-list-add-btn';
+      ab.innerHTML = '<i class="bi bi-plus"></i> 添加封禁';
+      ab.onclick = function() { items.push({username:'',reason:''}); render(); };
+      ar.appendChild(ab);
+      render(); wrapper.appendChild(ar);
+      return wrapper;
+    }
+
+    function createModListEditor(field, configData) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'config-list-editor';
+      wrapper.dataset.fieldKey = field.key;
+      var items = Array.isArray(configData) ? configData.slice() : [];
+      function render() {
+        wrapper.querySelectorAll('.config-list-item').forEach(function(el) { el.remove(); });
+        items.forEach(function(item, idx) {
+          var row = document.createElement('div'); row.className = 'config-list-item';
+          var modName = typeof item==='object'&&item.name ? item.name : (typeof item==='string'?item:'');
+          var enabled = typeof item==='object' ? (item.enabled!==false) : true;
+          var ec = document.createElement('input'); ec.type='checkbox'; ec.checked=enabled; ec.style.cssText='width:16px;height:16px;flex-shrink:0;';
+          ec.onchange = function() { if(typeof items[idx]==='string')items[idx]={name:modName,enabled:true}; items[idx].enabled=ec.checked; };
+          var ni = document.createElement('input'); ni.type='text'; ni.value=modName; ni.placeholder='Mod 名称'; ni.style.flex='1';
+          ni.oninput = function() { if(typeof items[idx]==='string')items[idx]={name:modName,enabled:true}; items[idx].name=ni.value; };
+          var sb = document.createElement('span'); sb.style.cssText='font-size:0.75rem;font-weight:600;min-width:36px;text-align:center;padding:2px 6px;border-radius:4px;';
+          sb.textContent = enabled ? '启用':'禁用';
+          sb.style.color = enabled ? 'var(--secondary-color)' : 'var(--color-text-secondary)';
+          sb.style.background = enabled ? 'rgba(39,174,96,0.1)' : 'var(--color-bg)';
+          ec.onchange = function() {
+            sb.textContent = ec.checked?'启用':'禁用';
+            sb.style.color = ec.checked?'var(--secondary-color)':'var(--color-text-secondary)';
+            sb.style.background = ec.checked?'rgba(39,174,96,0.1)':'var(--color-bg)';
+          };
+          row.appendChild(ec); row.appendChild(ni); row.appendChild(sb);
+          wrapper.appendChild(row);
+        });
+      }
+      var ar = document.createElement('div'); ar.className='config-list-add';
+      var ab = document.createElement('button'); ab.className='config-list-add-btn';
+      ab.innerHTML = '<i class="bi bi-plus"></i> 添加 Mod';
+      ab.onclick = function() { items.push({name:'',enabled:true}); render(); };
+      ar.appendChild(ab);
+      render(); wrapper.appendChild(ar);
+      return wrapper;
+    }
+    </script>
+</body>
+</html>

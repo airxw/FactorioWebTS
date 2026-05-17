@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  factorio-web-ts:
+    build: .
+    container_name: factorio-web-ts
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOST=0.0.0.0
+      - JWT_SECRET=${JWT_SECRET:-factorio-web-ts-prod-secret}
+      - RCON_HOST=${RCON_HOST:-127.0.0.1}
+      - RCON_PORT=${RCON_PORT:-27015}
+      - RCON_PASSWORD=${RCON_PASSWORD:-}
+      - DB_PATH=./data/factorio.db
+      - LOG_LEVEL=info
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8000}
+    restart: unless-stopped

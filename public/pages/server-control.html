@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务器控制 - FactorioWeb</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <style>
+        .console-panel {
+            background: var(--bg-dark, #1a1a2e);
+            border: 1px solid var(--border-color, #333);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 16px;
+            display: none;
+        }
+        .console-panel.visible {
+            display: block;
+        }
+        .console-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-darker, #111122);
+            border-bottom: 1px solid var(--border-color, #2a2a3e);
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .console-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #a0a0c0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .console-title i {
+            font-size: 16px;
+            color: #4a9eff;
+        }
+        .console-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        .console-badge.online {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+        .console-badge.offline {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+        .console-badge.reconnecting {
+            background: rgba(241, 196, 15, 0.2);
+            color: #f1c40f;
+        }
+        .console-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .console-actions button {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid #3a3a5a;
+            background: #1a1a30;
+            color: #a0a0c0;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .console-actions button:hover {
+            background: #2a2a40;
+            border-color: #5a5a8a;
+        }
+        .console-actions button.active {
+            background: #2a3a50;
+            border-color: #4a9eff;
+            color: #4a9eff;
+        }
+        .console-body {
+            height: 420px;
+            overflow-y: auto;
+            padding: 8px 0;
+            font-family: 'Courier New', Courier, 'Noto Sans Mono', monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            background: #0d0d1a;
+            color: #c0c0d0;
+        }
+        .console-body::-webkit-scrollbar {
+            width: 6px;
+        }
+        .console-body::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .console-body::-webkit-scrollbar-thumb {
+            background: #3a3a5a;
+            border-radius: 3px;
+        }
+        .console-line {
+            padding: 1px 16px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .console-line .ts {
+            color: #666;
+            margin-right: 8px;
+            user-select: none;
+        }
+        .console-line .tag {
+            font-weight: 600;
+            margin-right: 6px;
+            user-select: none;
+        }
+        .console-line.system { color: #c0c0d0; }
+        .console-line.system .tag { color: #8ab4f8; }
+        .console-line.error { color: #ff6b6b; background: rgba(255,80,80,0.06); }
+        .console-line.error .tag { color: #ff4444; }
+        .console-line.warn { color: #ffd93d; }
+        .console-line.warn .tag { color: #ffc107; }
+        .console-line.chat { color: #56d364; }
+        .console-line.chat .tag { color: #3fb950; }
+        .console-line.login { color: #79c0ff; }
+        .console-line.login .tag { color: #58a6ff; }
+        .console-line.logout { color: #8b949e; }
+        .console-line.logout .tag { color: #6e7681; }
+        .console-line.save { color: #d2a8ff; }
+        .console-line.save .tag { color: #bc8cff; }
+        .console-line.info { color: #c0c0d0; }
+        .console-line.info .tag { color: #8ab4f8; }
+        .console-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #555;
+            font-family: inherit;
+            gap: 10px;
+        }
+        .console-empty i { font-size: 32px; }
+        .console-empty p { font-size: 14px; margin: 0; }
+        .console-empty small { font-size: 12px; }
+        .scroll-hint {
+            position: absolute;
+            bottom: 12px;
+            right: 24px;
+            background: rgba(74, 158, 255, 0.85);
+            color: #fff;
+            font-size: 11px;
+            padding: 4px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            display: none;
+            z-index: 10;
+            font-family: inherit;
+        }
+        .scroll-hint.show { display: block; }
+        .status-banner {
+            display: none;
+            padding: 8px 16px;
+            margin-top: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .status-banner.visible { display: block; }
+        .status-banner.starting {
+            background: rgba(74, 158, 255, 0.1);
+            border: 1px solid rgba(74, 158, 255, 0.3);
+            color: #8ab4f8;
+        }
+        .status-banner.online {
+            background: rgba(46, 204, 113, 0.1);
+            border: 1px solid rgba(46, 204, 113, 0.3);
+            color: #3fb950;
+        }
+        .status-banner.stopped {
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            color: #f85149;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">服务器控制</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <span id="current-time" class="nav-time-display">--</span>
+                </div>
+            </nav>
+            <div class="page-content">
+                <div class="server-control-card">
+                    <div class="control-card-header">
+                        <div class="control-card-title"><i class="bi bi-hdd-rack"></i><span>服务器状态</span></div>
+                        <div class="status-badge" id="server-status-badge"><span class="status-dot"></span><span id="server-status-text">加载中...</span></div>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="btn-control btn-start" id="btn-start" onclick="startServer()"><i class="bi bi-play-fill"></i>启动服务器</button>
+                        <button class="btn-control btn-stop" id="btn-stop" onclick="stopServer()"><i class="bi bi-stop-fill"></i>停止服务器</button>
+                        <button class="btn-control btn-restart" id="btn-restart" onclick="restartServer()"><i class="bi bi-arrow-repeat"></i>重启服务器</button>
+                    </div>
+                    <div class="alert-message" id="alert-message"></div>
+                </div>
+
+                <div id="status-banner" class="status-banner"></div>
+
+                <div class="server-control-card" id="startup-config-card">
+                    <div class="control-card-header">
+                        <div class="control-card-title"><i class="bi bi-sliders"></i><span>启动配置</span></div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="select-version">版本选择</label>
+                        <select class="form-select" id="select-version">
+                            <option value="2.0.76">2.0.76</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="select-map">地图选择</label>
+                        <div class="input-group">
+                            <select class="form-select" id="select-map">
+                                <option value="">请先选择版本</option>
+                            </select>
+                            <button type="button" class="btn btn-outline-secondary" onclick="openUploadModal()" title="上传地图">
+                                <i class="bi bi-upload"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="openGenerateModal()" title="生成地图">
+                                <i class="bi bi-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="select-config">服务器配置文件</label>
+                        <select class="form-select" id="select-config">
+                            <option value="">加载中...</option>
+                        </select>
+                        <div class="popup-hint">启动服务器时使用的 server-settings 配置，<a href="config.html">更多配置管理 →</a></div>
+                    </div>
+                </div>
+
+                <div class="server-control-card">
+                    <div class="control-card-header">
+                        <div class="control-card-title"><i class="bi bi-info-circle"></i><span>服务器信息</span></div>
+                    </div>
+                    <div class="server-info-grid">
+                        <div class="info-item"><span class="info-label">服务器名称</span><span class="info-value" id="info-name">--</span></div>
+                        <div class="info-item"><span class="info-label">运行时间</span><span class="info-value" id="info-uptime">--</span></div>
+                        <div class="info-item"><span class="info-label">在线玩家</span><span class="info-value" id="info-players">--</span></div>
+                        <div class="info-item"><span class="info-label">服务器版本</span><span class="info-value" id="info-version">--</span></div>
+                        <div class="info-item"><span class="info-label">当前存档</span><span class="info-value" id="info-save">--</span></div>
+                        <div class="info-item"><span class="info-label">最后更新</span><span class="info-value" id="info-last-update">--</span></div>
+                    </div>
+                </div>
+
+                <div class="console-panel" id="console-panel">
+                    <div class="console-header">
+                        <div class="console-title">
+                            <i class="bi bi-terminal"></i> 实时控制台
+                            <span class="console-badge" id="console-badge">未连接</span>
+                        </div>
+                        <div class="console-actions">
+                            <button id="btn-autoscroll" class="active" onclick="toggleAutoScroll()" title="自动滚动到最新">
+                                <i class="bi bi-arrow-down-circle"></i> 自动滚动
+                            </button>
+                            <button onclick="clearConsoleLogs()" title="清空日志">
+                                <i class="bi bi-trash"></i> 清空
+                            </button>
+                            <button onclick="exportConsoleLogs()" title="导出日志">
+                                <i class="bi bi-download"></i> 导出
+                            </button>
+                        </div>
+                    </div>
+                    <div class="console-body" id="console-body" style="position:relative;">
+                        <div class="console-empty" id="console-empty">
+                            <i class="bi bi-terminal"></i>
+                            <p>暂无日志输出</p>
+                            <small>启动服务器后将在此显示实时日志</small>
+                        </div>
+                        <div class="scroll-hint" id="scroll-hint" onclick="scrollToBottom()">
+                            <i class="bi bi-arrow-down"></i> 滚动到底部
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="loading-overlay" id="loading-overlay"><div class="loading-spinner"></div></div>
+
+    <div id="upload-modal" class="modal-overlay">
+        <div class="popup-panel">
+            <div class="popup-title">上传地图</div>
+            <div class="mb-4">
+                <label>选择地图文件</label>
+                <input type="file" id="map-upload-input" accept=".zip,.rar,.tar.gz">
+                <div class="popup-hint">支持 .zip, .rar, .tar.gz 格式</div>
+            </div>
+            <div class="popup-actions">
+                <button onclick="closeUploadModal()" class="popup-cancel-btn">取消</button>
+                <button onclick="uploadMap()" class="btn btn-primary fw-bold" style="padding:8px 24px;">上传</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="generate-modal" class="modal-overlay">
+        <div class="popup-panel">
+            <div class="popup-title">生成地图</div>
+            <div style="margin-bottom:20px;">
+                <label>地图名称</label>
+                <input type="text" id="generate-savename" placeholder="留空自动生成">
+            </div>
+            <div style="margin-bottom:20px;">
+                <label>地图种子</label>
+                <div class="popup-seed-row">
+                    <input type="text" id="generate-seed" placeholder="留空则随机生成">
+                    <button onclick="generateRandomSeed()" class="popup-seed-btn">随机</button>
+                </div>
+            </div>
+            <div class="popup-actions">
+                <button onclick="closeGenerateModal()" class="popup-cancel-btn">取消</button>
+                <button onclick="generateMap()" class="btn btn-success fw-bold" style="padding:8px 24px;">生成</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script>
+        var serverStatus = 'unknown';
+        var statusRefreshTimer = null;
+        var wsConnected = false;
+        var autoScroll = true;
+        var userScrolledUp = false;
+        var logEntries = [];
+        var MAX_LOG_ENTRIES = 2000;
+        var wasServerRunning = false;
+
+        function updateTime() {
+            var now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        function updateStatusBadge(status) {
+            var badge = document.getElementById('server-status-badge');
+            var text = document.getElementById('server-status-text');
+            badge.className = 'status-badge ' + status;
+            var statusMap = { 'online': '在线', 'offline': '离线', 'starting': '启动中...', 'stopping': '停止中...', 'unknown': '未知' };
+            text.textContent = statusMap[status] || '未知';
+            serverStatus = status;
+        }
+
+        function updateServerInfo(data) {
+            if (!data) return;
+            setText('info-name', data.name || '--');
+            setText('info-version', data.version || '--');
+            setText('info-last-update', data.last_update || '--');
+            setText('info-players', (data.players_count || 0) + ' 人');
+            setText('info-uptime', data.uptime || '--');
+            setText('info-save', data.save || '--');
+        }
+
+        function setText(id, text) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = text;
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds || seconds <= 0) return '--';
+            var d = Math.floor(seconds / 86400);
+            var h = Math.floor((seconds % 86400) / 3600);
+            var m = Math.floor((seconds % 3600) / 60);
+            var s = Math.floor(seconds % 60);
+            var parts = [];
+            if (d > 0) parts.push(d + '天');
+            if (h > 0) parts.push(h + '时');
+            if (m > 0) parts.push(m + '分');
+            if (s > 0 || parts.length === 0) parts.push(s + '秒');
+            return parts.join(' ');
+        }
+
+        function showAlert(message, type) {
+            var alert = document.getElementById('alert-message');
+            alert.className = 'alert-message ' + type;
+            alert.innerHTML = '<i class="bi bi-' + (type === 'error' ? 'exclamation-circle-fill' : 'check-circle-fill') + '"></i> ' + message;
+            alert.style.display = 'block';
+            setTimeout(function() { alert.style.display = 'none'; }, 5000);
+        }
+
+        function showLoading() { document.getElementById('loading-overlay').classList.add('active'); }
+        function hideLoading() { document.getElementById('loading-overlay').classList.remove('active'); }
+
+        function updateStatusBanner(state, message) {
+            var banner = document.getElementById('status-banner');
+            banner.className = 'status-banner ' + state;
+            banner.innerHTML = message;
+            if (state === '') {
+                banner.classList.remove('visible');
+            } else {
+                banner.classList.add('visible');
+            }
+        }
+
+        function showConsolePanel() {
+            document.getElementById('console-panel').classList.add('visible');
+        }
+
+        function hideConsolePanel() {
+            document.getElementById('console-panel').classList.remove('visible');
+        }
+
+        function updateConsoleBadge(state, text) {
+            var badge = document.getElementById('console-badge');
+            badge.className = 'console-badge ' + state;
+            badge.textContent = text;
+        }
+
+        function clearConsoleLogs() {
+            logEntries = [];
+            var body = document.getElementById('console-body');
+            var emptyEl = document.getElementById('console-empty');
+            body.querySelectorAll('.console-line').forEach(function(el) { el.remove(); });
+            if (emptyEl) emptyEl.style.display = 'flex';
+            updateScrollHint();
+        }
+
+        function appendConsoleLog(entry) {
+            var body = document.getElementById('console-body');
+            var emptyEl = document.getElementById('console-empty');
+            if (emptyEl) emptyEl.style.display = 'none';
+
+            logEntries.push(entry);
+            if (logEntries.length > MAX_LOG_ENTRIES) {
+                logEntries.shift();
+                var firstLine = body.querySelector('.console-line');
+                if (firstLine) firstLine.remove();
+            }
+
+            var line = document.createElement('div');
+            line.className = 'console-line ' + (entry.level === 'ERROR' ? 'error' : entry.level === 'WARN' ? 'warn' : entry.type || 'system');
+
+            var ts = document.createElement('span');
+            ts.className = 'ts';
+            ts.textContent = formatConsoleTime(entry.time);
+
+            var tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.textContent = '[' + (entry.level || entry.type || 'INFO') + ']';
+
+            var msg = document.createElement('span');
+            msg.className = 'msg';
+            msg.textContent = (entry.message || entry.msg || entry.content || '');
+
+            line.appendChild(ts);
+            line.appendChild(tag);
+            line.appendChild(msg);
+            body.appendChild(line);
+
+            if (autoScroll && !userScrolledUp) {
+                scrollToBottomImmediate();
+            }
+        }
+
+        function formatConsoleTime(time) {
+            if (!time) return '';
+            try {
+                var parts = time.split(' ');
+                if (parts.length >= 2) {
+                    var timePart = parts[1];
+                    if (timePart.length >= 8) {
+                        return timePart.substring(0, 8);
+                    }
+                }
+                return time;
+            } catch (e) {
+                return time;
+            }
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            var btn = document.getElementById('btn-autoscroll');
+            if (autoScroll) {
+                btn.classList.add('active');
+                btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i> 自动滚动';
+                scrollToBottomImmediate();
+                userScrolledUp = false;
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = '<i class="bi bi-pause-circle"></i> 暂停滚动';
+            }
+        }
+
+        function scrollToBottom() {
+            var body = document.getElementById('console-body');
+            body.scrollTo({ top: body.scrollHeight, behavior: 'smooth' });
+        }
+
+        function scrollToBottomImmediate() {
+            var body = document.getElementById('console-body');
+            body.scrollTop = body.scrollHeight;
+        }
+
+        function updateScrollHint() {
+            var body = document.getElementById('console-body');
+            var hint = document.getElementById('scroll-hint');
+            if (!body || !hint) return;
+            var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 100;
+            if (atBottom) {
+                hint.classList.remove('show');
+                userScrolledUp = false;
+            }
+        }
+
+        function connectWebSocket() {
+            loadRecentLogs();
+
+            wsClient.on('open', function() {
+                wsConnected = true;
+                updateConsoleBadge('online', '已连接');
+            });
+
+            wsClient.subscribe('log', function(entry) {
+                if (entry) {
+                    appendConsoleLog(entry);
+                }
+            });
+
+            wsClient.on('close', function() {
+                wsConnected = false;
+                updateConsoleBadge('offline', '已断开');
+            });
+
+            wsClient.on('error', function() {
+                wsConnected = false;
+                updateConsoleBadge('offline', '连接错误');
+            });
+
+            wsClient.on('reconnecting', function() {
+                updateConsoleBadge('reconnecting', '重连中...');
+            });
+
+            if (!wsClient.connected) {
+                updateConsoleBadge('reconnecting', '连接中...');
+                wsClient.connect();
+            }
+        }
+
+        async function loadRecentLogs() {
+            try {
+                var response = await fetchAPI('/api/logs/tail?lines=100');
+                var result = await response.json();
+                if (result.success && result.data && result.data.logs) {
+                    result.data.logs.forEach(function(line) {
+                        appendConsoleLog(line);
+                    });
+                }
+            } catch (e) {
+                console.warn('加载最近日志失败:', e);
+            }
+        }
+
+        function disconnectWebSocket() {
+            wsClient.off('log');
+        }
+
+        function exportConsoleLogs() {
+            if (logEntries.length === 0) {
+                showToast('没有可导出的日志', 'warning');
+                return;
+            }
+            var content = logEntries.map(function(e) {
+                return '[' + (e.time || '') + '] [' + (e.level || 'INFO') + '] ' + (e.message || '');
+            }).join('\n');
+            var filename = 'factorio-console-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+            var blob = new Blob([content], { type: 'text/plain' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('日志已导出', 'success');
+        }
+
+        async function fetchServerStatus() {
+            try {
+                var response = await fetchAPI('/api/server/status');
+                var result = await response.json();
+                if (result.success && result.data) {
+                    var data = result.data;
+                    var isOnline = data.running === true;
+                    var isProcessRunning = data.processRunning === true;
+
+                    if (isOnline) {
+                        updateStatusBadge('online');
+                        showConsolePanel();
+                        if (!wsConnected && typeof wsClient !== 'undefined') {
+                            connectWebSocket();
+                        }
+                        updateStatusBanner('online', '<i class="bi bi-check-circle-fill"></i> <strong>服务器在线</strong> — 版本 ' + (data.version || '?') + '，玩家 ' + (data.playerCount || 0) + ' 人在线');
+                        localStorage.setItem('server_running', 'true');
+                        wasServerRunning = true;
+                    } else if (isProcessRunning) {
+                        updateStatusBadge('starting');
+                        showConsolePanel();
+                        if (!wsConnected && typeof wsClient !== 'undefined') {
+                            connectWebSocket();
+                        }
+                        updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong> 等待 Factorio 进程初始化完成');
+                        localStorage.setItem('server_running', 'true');
+                        wasServerRunning = true;
+                    } else {
+                        updateStatusBadge('offline');
+                        if (wasServerRunning || (data.lastExitCode !== null && data.lastExitCode !== 0)) {
+                            var exitMsg = data.lastExitError || ('退出码 ' + data.lastExitCode);
+                            updateStatusBanner('stopped', '<i class="bi bi-exclamation-triangle-fill"></i> <strong>服务器已停止</strong> — ' + exitMsg);
+                            showConsolePanel();
+                        } else {
+                            updateStatusBanner('', '');
+                        }
+                        wasServerRunning = false;
+                        localStorage.setItem('server_running', 'false');
+                    }
+
+                    if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
+                        SidebarMenu.refresh();
+                    }
+
+                    document.getElementById('btn-start').disabled = isOnline || isProcessRunning;
+                    document.getElementById('btn-stop').disabled = !isOnline && !isProcessRunning;
+                    document.getElementById('btn-restart').disabled = !isOnline && !isProcessRunning;
+
+                    var configCard = document.getElementById('startup-config-card');
+                    if (isOnline || isProcessRunning) {
+                        configCard.classList.add('disabled');
+                    } else {
+                        configCard.classList.remove('disabled');
+                    }
+
+                    try {
+                        var configRes = await fetchAPI('/api/config/get?file_type=server-settings');
+                        var configData = await configRes.json();
+                        if (configData.success && configData.data && configData.data.content) {
+                            var settings = typeof configData.data.content === 'string'
+                                ? JSON.parse(configData.data.content)
+                                : configData.data.content;
+                            data.name = settings.name || data.name || 'Factorio Server';
+                        } else {
+                            data.name = data.name || 'Factorio Server';
+                        }
+                    } catch (configErr) {
+                        console.warn('读取服务器名称失败，使用默认值:', configErr);
+                        data.name = data.name || 'Factorio Server';
+                    }
+                    data.players_count = data.playerCount;
+                    data.uptime = data.uptime ? formatUptime(data.uptime) : '--';
+                    data.last_update = new Date().toLocaleTimeString('zh-CN');
+                    data.save = data.logPath ? data.logPath.split('/').pop() : '--';
+                    updateServerInfo(data);
+                } else {
+                    updateStatusBadge('offline');
+                    updateStatusBanner('', '');
+                    localStorage.setItem('server_running', 'false');
+                    document.getElementById('btn-start').disabled = false;
+                    document.getElementById('btn-stop').disabled = true;
+                    document.getElementById('btn-restart').disabled = true;
+                    document.getElementById('startup-config-card').classList.remove('disabled');
+                }
+            } catch (err) {
+                console.error('获取服务器状态失败:', err);
+                updateStatusBadge('offline');
+                updateStatusBanner('', '');
+                document.getElementById('btn-start').disabled = false;
+                document.getElementById('btn-stop').disabled = true;
+                document.getElementById('btn-restart').disabled = true;
+                document.getElementById('startup-config-card').classList.remove('disabled');
+            }
+        }
+
+        async function loadVersions() {
+            try {
+                var response = await fetchAPI('/api/versions');
+                var result = await response.json();
+                var select = document.getElementById('select-version');
+                
+                if (!select) {
+                    console.error('select-version element not found');
+                    return;
+                }
+                
+                var stored = getStoredConfig();
+                var versions = [];
+                
+                if (result.success && result.data) {
+                    versions = result.data;
+                }
+                
+                setTimeout(function() {
+                    select.innerHTML = '';
+                    
+                    if (versions && versions.length > 0) {
+                        versions.forEach(function(ver) {
+                            var opt = document.createElement('option');
+                            opt.value = ver.version;
+                            opt.textContent = ver.version;
+                            if (stored.version === ver.version) {
+                                opt.selected = true;
+                            }
+                            select.appendChild(opt);
+                        });
+                        
+                        if (select.options.length > 0) {
+                            select.value = select.options[0].value;
+                        }
+                        
+                        if (stored.version) {
+                            setTimeout(function() {
+                                loadMaps(stored.version);
+                            }, 100);
+                        }
+                    } else {
+                        var emptyOption = document.createElement('option');
+                        emptyOption.value = '';
+                        emptyOption.textContent = '没有可用版本';
+                        select.appendChild(emptyOption);
+                    }
+                    
+                    select.dispatchEvent(new Event('change'));
+                }, 100);
+            } catch (err) {
+                console.error('加载版本列表失败:', err);
+                var select = document.getElementById('select-version');
+                if (select) {
+                    select.innerHTML = '<option value="">加载失败</option>';
+                }
+            }
+        }
+
+        async function loadMaps(version) {
+            try {
+                var response = await fetchAPI('/api/files/saves');
+                var result = await response.json();
+                var select = document.getElementById('select-map');
+                select.innerHTML = '';
+                var stored = getStoredConfig();
+                var saves = result.data || [];
+                if (saves && saves.length > 0) {
+                    saves.forEach(function(save) {
+                        var opt = document.createElement('option');
+                        opt.value = save.filename;
+                        opt.textContent = save.filename;
+                        if (stored.map === save.filename) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">没有可用地图</option>';
+                }
+            } catch (err) {
+                console.error('加载地图列表失败:', err);
+                var select = document.getElementById('select-map');
+                select.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
+
+        async function loadConfigs() {
+            var select = document.getElementById('select-config');
+            var stored = getStoredConfig();
+            try {
+                var response = await fetchAPI('/api/config/files');
+                var result = await response.json();
+                var files = (result.data && result.data.files) || [];
+                select.innerHTML = '';
+                var settingsFiles = files.filter(function(f) { return f.filename.indexOf('server-settings') === 0; });
+                if (settingsFiles.length > 0) {
+                    settingsFiles.forEach(function(f) {
+                        var opt = document.createElement('option');
+                        opt.value = f.filename;
+                        opt.textContent = f.filename;
+                        if (stored.config === f.filename) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                    if (!stored.config) select.value = 'server-settings.json';
+                } else {
+                    select.innerHTML = '<option value="server-settings.json">server-settings.json</option>';
+                }
+            } catch (e) {
+                select.innerHTML = '<option value="server-settings.json">server-settings.json</option>';
+            }
+        }
+
+        function getStoredConfig() {
+            try {
+                var stored = localStorage.getItem('factorio_start_config');
+                return stored ? JSON.parse(stored) : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveCurrentConfig() {
+            var config = {
+                version: document.getElementById('select-version').value,
+                map: document.getElementById('select-map').value,
+                config: document.getElementById('select-config').value
+            };
+            localStorage.setItem('factorio_start_config', JSON.stringify(config));
+        }
+
+        async function startServer() {
+            if (serverStatus === 'starting' || serverStatus === 'stopping') return;
+            
+            var version = document.getElementById('select-version').value;
+            var map = document.getElementById('select-map').value;
+            var config = document.getElementById('select-config').value;
+            
+            if (!version || !map) {
+                showAlert('请先选择版本和地图', 'error');
+                return;
+            }
+            
+            saveCurrentConfig();
+            
+            showModal({ title: '确认', content: '确定要启动服务器吗？启动后可在下方控制台查看实时日志。', confirmText: '确认启动', onConfirm: async function() {
+                showLoading();
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-stop').disabled = true;
+                document.getElementById('btn-restart').disabled = true;
+                updateStatusBadge('starting');
+                showConsolePanel();
+                connectWebSocket();
+                updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong> 等待进程初始化和 RCON 就绪');
+                
+                try {
+                    var res = await fetchAPI('/api/server/start', { 
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ version: version, map: map, config: config })
+                    });
+                    var result = await res.json();
+                    if (result.success) {
+                        showAlert('服务器启动命令已发送，请关注下方实时日志', 'success');
+                        updateStatusBanner('starting', '<i class="bi bi-gear"></i> <strong>Factorio 正在初始化...</strong> 日志将实时显示在下方控制台');
+                        localStorage.setItem('server_running', 'true');
+                        if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
+                            SidebarMenu.refresh();
+                        }
+                        setTimeout(fetchServerStatus, 1500);
+                    } else {
+                        showAlert(result.error || '启动服务器失败', 'error');
+                        updateStatusBadge('offline');
+                        updateStatusBanner('stopped', '<i class="bi bi-exclamation-triangle-fill"></i> <strong>启动失败:</strong> ' + (result.error || '未知错误'));
+                        document.getElementById('btn-start').disabled = false;
+                        localStorage.setItem('server_running', 'false');
+                    }
+                } catch (err) {
+                    showAlert('启动服务器失败: ' + err.message, 'error');
+                    updateStatusBadge('offline');
+                    updateStatusBanner('stopped', '<i class="bi bi-exclamation-triangle-fill"></i> <strong>启动失败:</strong> ' + err.message);
+                    document.getElementById('btn-start').disabled = false;
+                    localStorage.setItem('server_running', 'false');
+                }
+                hideLoading();
+            }});
+        }
+
+        async function stopServer() {
+            if (serverStatus === 'stopping') return;
+            showModal({ title: '确认', content: '确定要停止服务器吗？所有未保存的进度可能丢失。', confirmText: '确认停止', danger: true, onConfirm: async function() {
+                showLoading();
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-stop').disabled = true;
+                document.getElementById('btn-restart').disabled = true;
+                updateStatusBadge('stopping');
+                updateStatusBanner('stopped', '<i class="bi bi-hourglass-split"></i> <strong>正在停止服务器...</strong> 保存存档并发送退出指令');
+                try {
+                    var res = await fetchAPI('/api/server/stop', { method: 'POST' });
+                    var result = await res.json();
+                    if (result.success) {
+                        showAlert('服务器停止命令已发送', 'success');
+                        updateStatusBanner('stopped', '<i class="bi bi-check-circle"></i> <strong>服务器已停止</strong>');
+                        localStorage.setItem('server_running', 'false');
+                        if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
+                            SidebarMenu.refresh();
+                        }
+                        setTimeout(function() {
+                            updateStatusBadge('offline');
+                            updateStatusBanner('', '');
+                            document.getElementById('btn-start').disabled = false;
+                            document.getElementById('startup-config-card').classList.remove('disabled');
+                            updateConsoleBadge('offline', '已断开');
+                        }, 3000);
+                    } else {
+                        showAlert(result.error || '停止服务器失败', 'error');
+                        updateStatusBadge('online');
+                        updateStatusBanner('online', '');
+                        document.getElementById('btn-stop').disabled = false;
+                        document.getElementById('btn-restart').disabled = false;
+                    }
+                } catch (err) { showAlert('停止服务器失败: ' + err.message, 'error'); }
+                hideLoading();
+                setTimeout(fetchServerStatus, 2000);
+            }});
+        }
+
+        async function restartServer() {
+            if (serverStatus === 'starting' || serverStatus === 'stopping') return;
+            showModal({ title: '确认', content: '确定要重启服务器吗？重启过程可能需要几十秒。', confirmText: '确认重启', danger: true, onConfirm: async function() {
+                showLoading();
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-stop').disabled = true;
+                document.getElementById('btn-restart').disabled = true;
+                updateStatusBadge('stopping');
+                showConsolePanel();
+                connectWebSocket();
+                updateStatusBanner('starting', '<i class="bi bi-arrow-repeat"></i> <strong>正在重启服务器...</strong> 先停止再重新启动');
+                try {
+                    var res = await fetchAPI('/api/server/restart', { method: 'POST' });
+                    var result = await res.json();
+                    if (result.success) {
+                        showAlert('服务器重启命令已发送', 'success');
+                        updateStatusBanner('starting', '<i class="bi bi-gear"></i> <strong>Factorio 正在重新启动...</strong>');
+                        localStorage.setItem('server_running', 'true');
+                        if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
+                            SidebarMenu.refresh();
+                        }
+                        setTimeout(fetchServerStatus, 3000);
+                    } else {
+                        showAlert(result.error || '重启服务器失败', 'error');
+                        updateStatusBadge('online');
+                        updateStatusBanner('online', '');
+                        document.getElementById('btn-stop').disabled = false;
+                        document.getElementById('btn-restart').disabled = false;
+                    }
+                } catch (err) { showAlert('重启服务器失败: ' + err.message, 'error'); }
+                hideLoading();
+            }});
+        }
+
+        function openUploadModal() {
+            document.getElementById('upload-modal').classList.add('show');
+        }
+
+        function closeUploadModal() {
+            document.getElementById('upload-modal').classList.remove('show');
+            document.getElementById('map-upload-input').value = '';
+        }
+
+        async function uploadMap() {
+            var fileInput = document.getElementById('map-upload-input');
+            var file = fileInput.files[0];
+            
+            if (!file) {
+                showAlert('请选择要上传的地图文件', 'error');
+                return;
+            }
+
+            showLoading();
+            try {
+                var reader = new FileReader();
+                reader.readAsDataURL(file);
+                var base64 = await new Promise(function(resolve, reject) {
+                    reader.onload = function() {
+                        var result = reader.result;
+                        var content = result.split(',')[1];
+                        resolve(content);
+                    };
+                    reader.onerror = function() { reject(new Error('读取文件失败')); };
+                });
+                var res = await fetchAPI('/api/files/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: file.name, content: base64 })
+                });
+                var result = await res.json();
+                if (result.success) {
+                    showAlert('地图上传成功', 'success');
+                    closeUploadModal();
+                    var version = document.getElementById('select-version').value;
+                    if (version) { loadMaps(version); }
+                } else {
+                    showAlert(result.error || '上传失败', 'error');
+                }
+            } catch (err) {
+                showAlert('上传失败: ' + err.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function openGenerateModal() {
+            document.getElementById('generate-modal').classList.add('show');
+            document.getElementById('generate-savename').value = '';
+            document.getElementById('generate-seed').value = '';
+        }
+
+        function closeGenerateModal() {
+            document.getElementById('generate-modal').classList.remove('show');
+        }
+
+        function generateRandomSeed() {
+            var seed = Math.floor(Math.random() * 2147483647).toString();
+            document.getElementById('generate-seed').value = seed;
+        }
+
+        async function generateMap() {
+            var savename = document.getElementById('generate-savename').value.trim();
+            var seed = document.getElementById('generate-seed').value.trim();
+            var version = document.getElementById('select-version').value;
+            
+            if (!version) {
+                showAlert('请先选择版本', 'error');
+                return;
+            }
+
+            if (savename && !/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(savename)) {
+                showAlert('地图名称只能包含字母、数字、下划线、短横线或中文', 'error');
+                return;
+            }
+
+            if (seed && !/^-?\d{1,20}$/.test(seed)) {
+                showAlert('种子必须是有效的整数（如 123456789）', 'error');
+                return;
+            }
+
+            showLoading();
+            try {
+                var body = { version: version };
+                if (savename) body.save_name = savename;
+                if (seed) body.seed = seed;
+
+                var res = await fetchAPI('/api/files/create-save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                var result = await res.json();
+                if (result.success) {
+                    var sizeInfo = result.data && result.data.size ? '（' + result.data.size + '）' : '';
+                    showAlert('地图生成成功' + sizeInfo + '！', 'success');
+                    closeGenerateModal();
+                    loadMaps(version);
+                } else {
+                    showAlert(result.error || '生成失败', 'error');
+                }
+            } catch (err) {
+                showAlert('生成失败: ' + err.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({ 
+                requireAuth: true,
+                onValid: function(userData) {
+                    if (userData.role !== 'admin') {
+                        showToast('权限不足，只有管理员才能访问此页面', 'error');
+                        setTimeout(function() {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        return;
+                    }
+                    SidebarMenu.initSidebarWithPermission();
+                    updateTime();
+                    setInterval(updateTime, 1000);
+                    
+                    loadVersions();
+                    loadConfigs();
+                    
+                    document.getElementById('select-version').addEventListener('change', function() {
+                        loadMaps(this.value);
+                        saveCurrentConfig();
+                    });
+                    
+                    document.getElementById('select-map').addEventListener('change', saveCurrentConfig);
+                    document.getElementById('select-config').addEventListener('change', saveCurrentConfig);
+
+                    var consoleBody = document.getElementById('console-body');
+                    if (consoleBody) {
+                        consoleBody.addEventListener('scroll', function() {
+                            var threshold = 100;
+                            var atBottom = consoleBody.scrollHeight - consoleBody.scrollTop - consoleBody.clientHeight < threshold;
+                            var hint = document.getElementById('scroll-hint');
+                            if (!atBottom) {
+                                userScrolledUp = true;
+                                if (hint) hint.classList.add('show');
+                            } else {
+                                userScrolledUp = false;
+                                if (hint) hint.classList.remove('show');
+                            }
+                        });
+                    }
+                    
+                    fetchServerStatus();
+                    statusRefreshTimer = setInterval(fetchServerStatus, 5000);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

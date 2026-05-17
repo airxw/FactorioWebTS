@@ -1,0 +1,28 @@
+{
+    "server": {
+        "factorio_path": "\/home\/air\/Documents\/FactorioWebTS\/versions\/2.0.76\/bin\/x64\/factorio",
+        "config_path": "\/home\/air\/Documents\/FactorioWebTS\/config\/server-settings.json",
+        "log_path": "\/home\/air\/Documents\/FactorioWebTS\/versions\/2.0.76\/factorio-current.log",
+        "screen_name": "factorio_server",
+        "name": "Factorio \u670d\u52a1\u5668",
+        "port": "34197",
+        "status": "running",
+        "start_time": 1778413400
+    },
+    "rcon": {
+        "host": "127.0.0.1",
+        "port": 27015
+    },
+    "websocket": {
+        "host": "0.0.0.0",
+        "port": 34799,
+        "internal_port": 34798
+    },
+    "security": {
+        "internal_api_key": "factorio-web-internal-key-eae296cd8d499adc",
+        "jwt_secret": "68afbd8d5a4c559c34224b8f8a184a29d16b29ce21d898d06d10aa1751615bfc"
+    },
+    "daemon": {
+        "push_url": "http:\/\/127.0.0.1:34798\/push"
+    }
+}

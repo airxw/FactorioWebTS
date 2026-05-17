@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="ws-port" content="34799">
+    <title>物品请求 - FactorioWeb</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">物品请求</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="logout()">退出登录</button>
+                </div>
+            </nav>
+            <div class="page-content">
+                <div class="page-header">
+                    <div class="page-header-left">
+                        <h4><i class="bi bi-inbox page-header-icon"></i>物品请求</h4>
+                        <p>管理玩家的物品请求审批</p>
+                    </div>
+                </div>
+
+                <div class="card-default">
+                    <div class="card-header-default">
+                        <span class="card-header-title"><i class="bi bi-inbox"></i>请求列表</span>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="filter-request" onchange="loadRequests()" class="inline-select">
+                                <option value="pending">待处理</option><option value="approved">已批准</option><option value="rejected">已拒绝</option><option value="">全部</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadRequests()"><i class="bi bi-arrow-repeat me-1"></i>刷新</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table mb-0">
+                            <thead><tr><th>物品代码</th><th>物品名称</th><th>请求玩家</th><th>状态</th><th>请求时间</th><th style="text-align:right;">操作</th></tr></thead>
+                            <tbody id="request-list-body"><tr><td colspan="6" class="text-center text-muted" style="padding:24px;">加载中...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+    <script>
+
+        async function loadRequests() {
+            const status = document.getElementById('filter-request').value;
+            try {
+                const url = '/api/shop/item-requests' + (status ? '?status=' + encodeURIComponent(status) : '');
+                const response = await fetchAPI(url);
+                const data = await response.json();
+                if (data.success && data.requests) { renderRequests(data.requests); }
+                else { document.getElementById('request-list-body').innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:24px;">暂无请求</td></tr>'; }
+            } catch (e) {
+                document.getElementById('request-list-body').innerHTML = '<tr><td colspan="6" class="text-center" style="padding:24px;color:#e74c3c;">加载失败</td></tr>';
+            }
+        }
+
+        function renderRequests(requests) {
+            const tbody = document.getElementById('request-list-body');
+            if (!requests || requests.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:24px;">暂无请求</td></tr>'; return; }
+            const statusMap = { pending: { text: '待处理', cls: 'pending' }, approved: { text: '已批准', cls: 'approved' }, rejected: { text: '已拒绝', cls: 'rejected' } };
+            tbody.innerHTML = requests.map(function(req) {
+                const status = statusMap[req.status] || { text: req.status || '未知', cls: 'pending' };
+                const actions = req.status === 'pending' ?
+                    '<button class="request-action-btn approve" onclick="approveRequest(' + (req.id || 0) + ')"><i class="bi bi-check-lg"></i> 批准</button>' +
+                    '<button class="request-action-btn reject" onclick="rejectRequest(' + (req.id || 0) + ')"><i class="bi bi-x-lg"></i> 拒绝</button>' :
+                    '<span class="text-muted" style="font-size:0.82rem;">--</span>';
+                const date = req.created_at ? new Date(req.created_at * 1000).toLocaleString('zh-CN') : '--';
+                return '<tr>' +
+                    '<td><span class="code-text">' + escapeHtml(req.code || '--') + '</span></td>' +
+                    '<td class="fw-bold">' + escapeHtml(req.name_cn || req.name || '--') + '</td>' +
+                    '<td>' + escapeHtml(req.requester || '--') + '</td>' +
+                    '<td><span class="status-badge-inline ' + status.cls + '">' + status.text + '</span></td>' +
+                    '<td><small class="text-muted">' + escapeHtml(date) + '</small></td>' +
+                    '<td class="text-right"><div style="display:flex;gap:6px;justify-content:flex-end;">' + actions + '</div></td></tr>';
+            }).join('');
+        }
+
+        async function approveRequest(id) {
+            try {
+                const response = await fetchAPI('/api/shop/item-requests/' + id + '/approve', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) { showToast('已批准', 'success'); loadRequests(); }
+                else { showToast(data.error || '操作失败', 'error'); }
+            } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
+        }
+
+        async function rejectRequest(id) {
+            try {
+                const response = await fetchAPI('/api/shop/item-requests/' + id + '/reject', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) { showToast('已拒绝', 'success'); loadRequests(); }
+                else { showToast(data.error || '操作失败', 'error'); }
+            } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({
+                requireAuth: true,
+                onValid: function(userData) {
+                    if (userData.role !== 'admin') {
+                        showToast('权限不足，只有管理员才能访问此页面', 'error');
+                        setTimeout(function() {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        return;
+                    }
+                    SidebarMenu.initSidebarWithPermission();
+                    loadRequests();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

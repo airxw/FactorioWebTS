@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="ws-port" content="34799">
+    <title>个人中心 - FactorioWeb</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">个人中心</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="logout()">退出登录</button>
+                </div>
+            </nav>
+            <div class="page-content">
+                <div class="profile-main">
+                    <div class="page-title-row">
+                        <div>
+                            <h2>
+                                <i class="bi bi-person-circle text-primary"></i>个人中心
+                            </h2>
+                            <p class="page-title-sub">管理您的账户信息、VIP 状态和游戏角色绑定</p>
+                        </div>
+                    </div>
+
+                    <div class="profile-card">
+                        <div class="profile-card-header"><i class="bi bi-person-badge"></i>用户信息</div>
+                        <div class="profile-card-body">
+                            <div class="info-row">
+                                <div>
+                                    <div class="info-label"><i class="bi bi-person"></i>用户名</div>
+                                    <div class="username-display" id="info-username">加载中...</div>
+                                </div>
+                                <div class="info-value" id="info-role"><span class="role-badge">加载中...</span></div>
+                            </div>
+                            <div class="divider-light"></div>
+                            <div class="info-row"><span class="info-label"><i class="bi bi-calendar3"></i>注册时间</span><span class="info-value" id="info-regdate">加载中...</span></div>
+                            <div class="info-row"><span class="info-label"><i class="bi bi-clock"></i>最后登录</span><span class="info-value" id="info-lastlogin">加载中...</span></div>
+                        </div>
+                    </div>
+
+                    <div class="profile-card">
+                        <div class="profile-card-header"><i class="bi bi-gem"></i>VIP 状态</div>
+                        <div class="profile-card-body">
+                            <div class="info-row"><span class="info-label"><i class="bi bi-star"></i>VIP 等级</span><span class="info-value" id="info-vip-level"><span class="bind-status unbound"><i class="bi bi-x-circle"></i>非 VIP</span></span></div>
+                            <div class="info-row"><span class="info-label"><i class="bi bi-calendar-check"></i>到期时间</span><span class="info-value" id="info-vip-expire">--</span></div>
+                        </div>
+                    </div>
+
+                    <div class="profile-card">
+                        <div class="profile-card-header"><i class="bi bi-link-45deg"></i>游戏角色绑定</div>
+                        <div class="profile-card-body">
+                            <div class="info-row"><span class="info-label"><i class="bi bi-controller"></i>绑定状态</span><span class="info-value" id="info-bind-status"><span class="bind-status unbound"><i class="bi bi-x-circle"></i>未绑定</span></span></div>
+                            <div class="info-row d-none" id="bind-player-row"><span class="info-label"><i class="bi bi-person-check"></i>已绑定玩家</span><span class="info-value" id="info-bind-player">--</span></div>
+                            <div id="bind-section" class="mt-3">
+                                <div id="bind-form">
+                                    <label class="form-label fw-bold text-muted" style="font-size:0.8rem;">绑定游戏角色</label>
+                                    <p class="text-muted" style="font-size:0.8rem;margin-bottom:12px;">绑定后可使用面板功能管理您的游戏角色</p>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="bind-player-name" placeholder="输入游戏内玩家名称">
+                                        <button class="btn btn-primary" onclick="requestBindCode()" id="bind-request-btn"><i class="bi bi-key me-1"></i>获取验证码</button>
+                                    </div>
+                                </div>
+                                <div id="bind-verify" class="d-none">
+                                    <div class="verification-code-box">
+                                        <div class="hint">请在游戏中使用以下验证码完成绑定</div>
+                                        <div class="code" id="bind-code">------</div>
+                                        <div class="hint">验证码有效期 5 分钟</div>
+                                    </div>
+                                    <ul class="step-list">
+                                        <li><span class="step-num">1</span><span>输入游戏内玩家名称并获取验证码</span></li>
+                                        <li><span class="step-num">2</span><span>进入 Factorio 服务器，在聊天框中输入: <code>#bind &lt;验证码&gt;</code></span></li>
+                                        <li><span class="step-num">3</span><span>绑定成功后此页面将自动更新</span></li>
+                                    </ul>
+                                    <div class="mt-3"><button class="btn btn-sm btn-outline-secondary" onclick="cancelBind()"><i class="bi bi-x-lg me-1"></i>取消绑定</button></div>
+                                </div>
+                            </div>
+                            <div id="unbind-section" class="d-none mt-3">
+                                <button class="btn btn-sm btn-outline-danger" onclick="unbindPlayer()"><i class="bi bi-link-break me-1"></i>解除绑定</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="profile-card">
+                        <div class="profile-card-header"><i class="bi bi-shield-lock"></i>修改密码</div>
+                        <div class="profile-card-body">
+                            <form id="password-form" onsubmit="return changePassword(event)">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">旧密码 <span class="required-star">*</span></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="old-password" placeholder="请输入当前密码" required>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('old-password',this)"><i class="bi bi-eye"></i></button>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">新密码 <span style="color:#e74c3c;">*</span></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="new-password" placeholder="请输入新密码 (至少6位)" required minlength="6" oninput="checkPasswordStrength()">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('new-password',this)"><i class="bi bi-eye"></i></button>
+                                    </div>
+                                    <div class="password-strength"><div class="bar" id="password-strength-bar" style="width:0%;"></div></div>
+                                    <small id="password-strength-text" class="text-muted" style="font-size:0.8rem;">密码强度</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">确认新密码 <span style="color:#e74c3c;">*</span></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="confirm-password" placeholder="请再次输入新密码" required minlength="6">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('confirm-password',this)"><i class="bi bi-eye"></i></button>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-check-lg me-1"></i>修改密码</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+    <script src="/js/app.js"></script>
+    <script>
+        function formatDate(ts) {
+            if (!ts) return '--';
+            var d = new Date(ts * 1000);
+            var Y = d.getFullYear();
+            var M = String(d.getMonth() + 1).padStart(2, '0');
+            var D = String(d.getDate()).padStart(2, '0');
+            var h = String(d.getHours()).padStart(2, '0');
+            var m = String(d.getMinutes()).padStart(2, '0');
+            var s = String(d.getSeconds()).padStart(2, '0');
+            return Y + '-' + M + '-' + D + ' ' + h + ':' + m + ':' + s;
+        }
+
+        async function loadProfile() {
+            try {
+                var res = await fetchAPI('/api/auth/me');
+                var data = await res.json();
+                if (data && data.data) {
+                    var userData = data.data;
+                    document.getElementById('info-username').textContent = userData.username || '--';
+                    document.getElementById('info-role').innerHTML = '<span class="role-badge"><i class="bi bi-shield-fill me-1"></i>' + escapeHtml(userData.role || '用户') + '</span>';
+                    document.getElementById('info-regdate').textContent = formatDate(userData.created_at);
+                    document.getElementById('info-lastlogin').textContent = formatDate(userData.last_login_at);
+                    if (userData.vip_level && userData.vip_level > 0) {
+                        document.getElementById('info-vip-level').innerHTML = '<span class="vip-badge"><i class="bi bi-gem-fill"></i>VIP ' + userData.vip_level + '</span>';
+                        if (userData.vip_expiry) {
+                            var now = Math.floor(Date.now() / 1000);
+                            if (userData.vip_expiry < now) {
+                                document.getElementById('info-vip-expire').innerHTML = '<span style="color:var(--danger-color, #dc3545);font-weight:700;">已过期 (' + formatDate(userData.vip_expiry) + ')</span>';
+                            } else {
+                                document.getElementById('info-vip-expire').innerHTML = '<span style="color:#e49b1f;font-weight:700;">' + formatDate(userData.vip_expiry) + '</span>';
+                            }
+                        }
+                    }
+                    if (userData.game_id) {
+                        document.getElementById('info-bind-status').innerHTML = '<span class="bind-status bound"><i class="bi bi-check-circle-fill"></i>已绑定</span>';
+                        document.getElementById('bind-player-row').style.display = 'flex';
+                        document.getElementById('info-bind-player').textContent = userData.game_id;
+                        document.getElementById('bind-form').style.display = 'none';
+                        document.getElementById('unbind-section').style.display = 'block';
+                    } else {
+                        document.getElementById('info-bind-status').innerHTML = '<span class="bind-status unbound"><i class="bi bi-x-circle"></i>未绑定</span>';
+                        document.getElementById('bind-player-row').style.display = 'none';
+                        document.getElementById('bind-form').style.display = 'block';
+                        document.getElementById('unbind-section').style.display = 'none';
+                    }
+                }
+            } catch (e) { console.error('加载个人信息失败', e); }
+        }
+
+        async function requestBindCode() {
+            var playerName = document.getElementById('bind-player-name').value.trim();
+            if (!playerName) { showToast('请输入玩家名称', 'error'); return; }
+            var btn = document.getElementById('bind-request-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>获取中...';
+            try {
+                var res = await fetchAPI('/api/auth/generate-binding-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player_name: playerName })
+                });
+                var data = await res.json();
+                if (data.success && data.data && data.data.code) {
+                    document.getElementById('bind-code').textContent = data.data.code;
+                    document.getElementById('bind-form').style.display = 'none';
+                    document.getElementById('bind-verify').style.display = 'block';
+                    showToast('验证码已生成，有效期5分钟', 'success');
+                } else { showToast(data.error || '获取验证码失败', 'error'); }
+            } catch (e) { showToast('获取验证码失败: ' + e.message, 'error'); }
+            finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-key me-1"></i>获取验证码'; }
+        }
+
+        function cancelBind() {
+            document.getElementById('bind-verify').style.display = 'none';
+            document.getElementById('bind-form').style.display = 'block';
+            document.getElementById('bind-player-name').value = '';
+        }
+
+        async function unbindPlayer() {
+            showModal({title:'确认解除绑定',content:'确定要解除游戏角色绑定吗？',confirmText:'解除',danger:true,onConfirm:function(){
+                (async function(){
+                    try {
+                        var res = await fetchAPI('/api/auth/unbind', { method: 'POST' });
+                        var data = await res.json();
+                        if (data.success) { showToast('已解除绑定', 'success'); loadProfile(); }
+                        else { showToast(data.error || '解除绑定失败', 'error'); }
+                    } catch (e) { showToast('解除绑定失败: ' + e.message, 'error'); }
+                })();
+            }});
+        }
+
+        function changePassword(event) {
+            event.preventDefault();
+            var oldPwd = document.getElementById('old-password').value;
+            var newPwd = document.getElementById('new-password').value;
+            var confirmPwd = document.getElementById('confirm-password').value;
+            if (!oldPwd || !newPwd || !confirmPwd) { showToast('请填写所有密码字段', 'error'); return false; }
+            if (newPwd.length < 6) { showToast('新密码至少需要6个字符', 'error'); return false; }
+            if (newPwd !== confirmPwd) { showToast('两次输入的新密码不一致', 'error'); return false; }
+            if (oldPwd === newPwd) { showToast('新密码不能与旧密码相同', 'error'); return false; }
+            fetchAPI('/api/auth/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.success) {
+                        showToast('密码修改成功', 'success');
+                        document.getElementById('old-password').value = '';
+                        document.getElementById('new-password').value = '';
+                        document.getElementById('confirm-password').value = '';
+                        document.getElementById('password-strength-bar').style.width = '0%';
+                        document.getElementById('password-strength-text').textContent = '密码强度';
+                        document.getElementById('password-strength-text').className = 'text-muted';
+                    } else { showToast(d.error || '密码修改失败', 'error'); }
+                })
+                .catch(function(e) { showToast('密码修改失败: ' + e.message, 'error'); });
+            return false;
+        }
+
+        function checkPasswordStrength() {
+            var pwd = document.getElementById('new-password').value;
+            var bar = document.getElementById('password-strength-bar');
+            var text = document.getElementById('password-strength-text');
+            if (!pwd) { bar.style.width = '0%'; text.textContent = '密码强度'; text.className = 'text-muted'; return; }
+            var strength = 0;
+            if (pwd.length >= 6) strength += 20;
+            if (pwd.length >= 10) strength += 20;
+            if (/[A-Z]/.test(pwd)) strength += 20;
+            if (/[0-9]/.test(pwd)) strength += 20;
+            if (/[^A-Za-z0-9]/.test(pwd)) strength += 20;
+            var color, label;
+            if (strength <= 20) { color = '#e74c3c'; label = '非常弱'; }
+            else if (strength <= 40) { color = '#e57373'; label = '弱'; }
+            else if (strength <= 60) { color = '#f39c12'; label = '一般'; }
+            else if (strength <= 80) { color = '#22c55e'; label = '强'; }
+            else { color = '#16a34a'; label = '非常强'; }
+            bar.style.width = strength + '%';
+            bar.style.background = color;
+            text.textContent = '密码强度: ' + label;
+            text.style.color = color;
+        }
+
+        function togglePasswordVisibility(inputId, btn) {
+            var input = document.getElementById(inputId);
+            var icon = btn.querySelector('i');
+            if (input.type === 'password') { input.type = 'text'; icon.className = 'bi bi-eye-slash'; }
+            else { input.type = 'password'; icon.className = 'bi bi-eye'; }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({ 
+                requireAuth: true, 
+                onValid: function() {
+                    SidebarMenu.initSidebarWithPermission();
+                    loadProfile();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

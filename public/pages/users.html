@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="ws-port" content="34799">
+    <title>用户管理 - FactorioWeb</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">用户管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadUsers()">刷新用户列表</button>
+                    <button class="btn btn-sm btn-primary" onclick="showCreateUserModal()">创建新用户</button>
+                    <button class="btn btn-sm btn-danger" id="logout-btn" onclick="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="tab-bar">
+                    <button class="tab-btn active" data-tab="users" onclick="switchTab('users')">用户管理</button>
+                    <button class="tab-btn" data-tab="permissions" onclick="switchTab('permissions')">页面权限</button>
+                </div>
+
+                <div id="tab-users" class="tab-content active">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h3 class="card-title">搜索用户</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <input type="text" id="search-keyword" class="form-control" placeholder="输入用户名或姓名进行搜索" onkeydown="if(event.key==='Enter') searchUsers()">
+                                </div>
+                                <div class="form-group" style="display: flex; align-items: flex-end;">
+                                    <button class="btn btn-primary" onclick="searchUsers()">搜索</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">用户列表</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="users-list" class="loading">正在加载用户列表...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-permissions" class="tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">普通用户页面权限控制</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-4">设置哪些页面对普通用户（非管理员）可见。管理员始终可以访问所有页面。</p>
+                            <div id="permissions-list" class="loading">正在加载权限设置...</div>
+                            <div class="mt-4" style="text-align: right;">
+                                <button class="btn btn-primary" onclick="savePermissions()">保存权限设置</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-user-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>创建新用户</h3>
+                <button class="modal-close" onclick="closeCreateUserModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="create-username">用户名</label>
+                    <input type="text" id="create-username" class="form-control" placeholder="输入用户名">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="create-password">密码</label>
+                    <input type="password" id="create-password" class="form-control" placeholder="输入密码">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="create-name">姓名</label>
+                    <input type="text" id="create-name" class="form-control" placeholder="输入姓名">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="create-role">角色</label>
+                    <select id="create-role" class="form-control">
+                        <option value="user">普通用户</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateUserModal()">取消</button>
+                <button class="btn btn-primary" onclick="createUser()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="user-detail-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>用户详情</h3>
+                <button class="modal-close" onclick="closeUserDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="user-detail-content"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeUserDetailModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+
+    <script>
+        var currentTab = 'users';
+        var permissionsData = [];
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(function(btn) {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.querySelectorAll('.tab-content').forEach(function(content) {
+                content.classList.toggle('active', content.id === 'tab-' + tab);
+            });
+            if (tab === 'permissions') {
+                loadPermissions();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({ 
+                requireAuth: true,
+                onValid: function(userData) {
+                    if (userData.role !== 'admin') {
+                        showToast('权限不足，只有管理员才能访问此页面', 'error');
+                        setTimeout(function() {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        return;
+                    }
+                    SidebarMenu.initSidebarWithPermission();
+                    loadUsers();
+                }
+            });
+        });
+
+        function apiFetch(path, options) {
+            options = options || {};
+            var headers = Object.assign({}, TokenManager.getAuthHeaders(), options.headers || {});
+            if (!(options.body instanceof FormData)) {
+                headers['Content-Type'] = 'application/json';
+            }
+            return fetch(path, Object.assign({}, options, { headers: headers }))
+                .then(function(response) {
+                    if (response.status === 401) {
+                        handleUnauthorized();
+                        throw new Error('Unauthorized');
+                    }
+                    return response.json();
+                });
+        }
+
+        function loadUsers() {
+            var listEl = document.getElementById('users-list');
+            listEl.className = 'loading';
+            listEl.innerHTML = '正在加载用户列表...';
+
+            apiFetch('/api/auth/users')
+            .then(function(data) {
+                if (data.success && data.data) {
+                    var users = data.data;
+                    var html = '<table class="table">';
+                    html += '<thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>游戏ID</th><th>创建时间</th><th>操作</th></tr></thead>';
+                    html += '<tbody>';
+                    
+                    users.forEach(function(user) {
+                        html += '<tr>';
+                        html += '<td>' + user.id + '</td>';
+                        html += '<td>' + escapeHtml(user.username) + '</td>';
+                        html += '<td>' + escapeHtml(user.name || user.username) + '</td>';
+                        html += '<td>' + escapeHtml(user.role || 'user') + '</td>';
+                        html += '<td>' + escapeHtml(user.game_id || '无') + '</td>';
+                        html += '<td>' + (user.created_at || '') + '</td>';
+                        html += '<td><button class="btn btn-sm btn-primary" onclick="showUserDetail(' + user.id + ')">详情</button></td>';
+                        html += '</tr>';
+                    });
+                    
+                    html += '</tbody></table>';
+                    listEl.className = '';
+                    listEl.innerHTML = html;
+                } else {
+                    listEl.className = '';
+                    listEl.innerHTML = '<p class="text-muted">加载用户列表失败: ' + escapeHtml(data.error || '未知错误') + '</p>';
+                }
+            })
+            .catch(function(err) {
+                listEl.className = '';
+                listEl.innerHTML = '<p class="text-muted">网络错误，请稍后重试</p>';
+                console.error('加载用户列表失败', err);
+            });
+        }
+
+        function searchUsers() {
+            var keyword = document.getElementById('search-keyword').value.trim();
+            var listEl = document.getElementById('users-list');
+            
+            if (!keyword) {
+                loadUsers();
+                return;
+            }
+            
+            listEl.className = 'loading';
+            listEl.innerHTML = '搜索中...';
+
+            apiFetch('/api/auth/users/search', {
+                method: 'POST',
+                body: JSON.stringify({ keyword: keyword })
+            })
+            .then(function(data) {
+                if (data.success && data.data) {
+                    var users = data.data;
+                    var html = '<table class="table">';
+                    html += '<thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>游戏ID</th><th>创建时间</th><th>操作</th></tr></thead>';
+                    html += '<tbody>';
+                    
+                    users.forEach(function(user) {
+                        html += '<tr>';
+                        html += '<td>' + user.id + '</td>';
+                        html += '<td>' + escapeHtml(user.username) + '</td>';
+                        html += '<td>' + escapeHtml(user.name || user.username) + '</td>';
+                        html += '<td>' + escapeHtml(user.role || 'user') + '</td>';
+                        html += '<td>' + escapeHtml(user.game_id || '无') + '</td>';
+                        html += '<td>' + (user.created_at || '') + '</td>';
+                        html += '<td><button class="btn btn-sm btn-primary" onclick="showUserDetail(' + user.id + ')">详情</button></td>';
+                        html += '</tr>';
+                    });
+                    
+                    html += '</tbody></table>';
+                    listEl.className = '';
+                    listEl.innerHTML = html;
+                } else {
+                    listEl.className = '';
+                    listEl.innerHTML = '<p class="text-muted">搜索失败: ' + escapeHtml(data.error || '未知错误') + '</p>';
+                }
+            })
+            .catch(function(err) {
+                listEl.className = '';
+                listEl.innerHTML = '<p class="text-muted">网络错误，请稍后重试</p>';
+                console.error('搜索用户失败', err);
+            });
+        }
+
+        function showCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'block';
+        }
+
+        function closeCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'none';
+            document.getElementById('create-username').value = '';
+            document.getElementById('create-password').value = '';
+            document.getElementById('create-name').value = '';
+            document.getElementById('create-role').value = 'user';
+        }
+
+        function createUser() {
+            var username = document.getElementById('create-username').value.trim();
+            var password = document.getElementById('create-password').value;
+            var name = document.getElementById('create-name').value.trim();
+            var role = document.getElementById('create-role').value;
+
+            if (!username || !password) {
+                showToast('用户名和密码不能为空', 'warning');
+                return;
+            }
+
+            apiFetch('/api/auth/users/create', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    name: name,
+                    role: role
+                })
+            })
+            .then(function(data) {
+                if (data.success) {
+                    showToast('用户创建成功', 'success');
+                    closeCreateUserModal();
+                    loadUsers();
+                } else {
+                    showToast('用户创建失败: ' + (data.error || '未知错误'), 'error');
+                }
+            })
+            .catch(function(err) {
+                showToast('创建用户时发生网络错误', 'error');
+                console.error('创建用户失败', err);
+            });
+        }
+
+        function showUserDetail(userId) {
+            var contentEl = document.getElementById('user-detail-content');
+            contentEl.innerHTML = '正在加载用户详情...';
+            document.getElementById('user-detail-modal').style.display = 'block';
+
+            apiFetch('/api/auth/users/' + userId)
+            .then(function(data) {
+                if (data.success && data.data) {
+                    var user = data.data;
+                    var html = '<div class="grid">';
+                    html += '<div class="card card-hover">';
+                    html += '<div class="card-body">';
+                    html += '<h4 class="mb-2">用户基本信息</h4>';
+                    html += '<p><strong>ID:</strong> ' + user.id + '</p>';
+                    html += '<p><strong>用户名:</strong> ' + escapeHtml(user.username) + '</p>';
+                    html += '<p><strong>姓名:</strong> ' + escapeHtml(user.name || user.username) + '</p>';
+                    html += '<p><strong>角色:</strong> ' + escapeHtml(user.role || 'user') + '</p>';
+                    html += '<p><strong>创建时间:</strong> ' + (user.created_at || '') + '</p>';
+                    html += '<p><strong>最后登录IP:</strong> ' + (user.last_login_ip ? user.last_login_ip : '暂无记录') + '</p>';
+                    html += '</div>';
+                    html += '</div>';
+                    html += '<div class="card card-hover">';
+                    html += '<div class="card-body">';
+                    html += '<h4 class="mb-2">游戏账户绑定</h4>';
+                    html += '<p><strong>游戏ID:</strong> ' + escapeHtml(user.game_id || '无') + '</p>';
+                    html += '<p><strong>绑定码:</strong> ' + escapeHtml(user.binding_code || '无') + '</p>';
+                    html += '</div>';
+                    html += '</div>';
+                    html += '</div>';
+                    contentEl.innerHTML = html;
+                } else {
+                    contentEl.innerHTML = '<p class="text-muted">加载用户详情失败: ' + escapeHtml(data.error || '未知错误') + '</p>';
+                }
+            })
+            .catch(function(err) {
+                contentEl.innerHTML = '<p class="text-muted">网络错误，请稍后重试</p>';
+                console.error('加载用户详情失败', err);
+            });
+        }
+
+        function closeUserDetailModal() {
+            document.getElementById('user-detail-modal').style.display = 'none';
+        }
+
+        function loadPermissions() {
+            var listEl = document.getElementById('permissions-list');
+            listEl.className = 'loading';
+            listEl.innerHTML = '正在加载权限设置...';
+
+            apiFetch('/api/auth/page-permissions')
+            .then(function(data) {
+                if (data.success && data.data) {
+                    permissionsData = data.data;
+                    renderPermissions();
+                } else {
+                    listEl.className = '';
+                    listEl.innerHTML = '<p class="text-muted">加载权限设置失败: ' + escapeHtml(data.error || '未知错误') + '</p>';
+                }
+            })
+            .catch(function(err) {
+                listEl.className = '';
+                listEl.innerHTML = '<p class="text-muted">网络错误，请稍后重试</p>';
+                console.error('加载权限设置失败', err);
+            });
+        }
+
+        function renderPermissions() {
+            var listEl = document.getElementById('permissions-list');
+            if (!permissionsData || permissionsData.length === 0) {
+                listEl.className = '';
+                listEl.innerHTML = '<p class="text-muted">暂无权限设置数据</p>';
+                return;
+            }
+
+            var html = '<div class="permission-grid">';
+            permissionsData.forEach(function(perm) {
+                var checked = perm.visible_to_user === 1 ? 'checked' : '';
+                html += '<div class="permission-item">';
+                html += '<div class="permission-info">';
+                html += '<span class="permission-label">' + escapeHtml(perm.label) + '</span>';
+                html += '<span class="permission-id">(' + escapeHtml(perm.page_id) + ')</span>';
+                html += '</div>';
+                html += '<label class="toggle-switch">';
+                html += '<input type="checkbox" ' + checked + ' data-page-id="' + escapeHtml(perm.page_id) + '" onchange="onPermissionToggle(this)">';
+                html += '<span class="toggle-slider"></span>';
+                html += '</label>';
+                html += '</div>';
+            });
+            html += '</div>';
+            listEl.className = '';
+            listEl.innerHTML = html;
+        }
+
+        function onPermissionToggle(el) {
+            var pageId = el.dataset.pageId;
+            var perm = permissionsData.find(function(p) { return p.page_id === pageId; });
+            if (perm) {
+                perm.visible_to_user = el.checked ? 1 : 0;
+            }
+        }
+
+        function savePermissions() {
+            var updates = permissionsData.map(function(perm) {
+                return {
+                    page_id: perm.page_id,
+                    visible_to_user: perm.visible_to_user === 1
+                };
+            });
+
+            var saveBtn = document.querySelector('#tab-permissions .btn-primary');
+            saveBtn.disabled = true;
+            saveBtn.textContent = '保存中...';
+
+            apiFetch('/api/auth/page-permissions', {
+                method: 'PUT',
+                body: JSON.stringify({ permissions: updates })
+            })
+            .then(function(data) {
+                if (data.success) {
+                    showToast('权限设置保存成功', 'success');
+                    localStorage.removeItem('sidebar_permissions');
+                } else {
+                    showToast('保存失败: ' + (data.error || '未知错误'), 'error');
+                }
+            })
+            .catch(function(err) {
+                showToast('网络错误，请稍后重试', 'error');
+                console.error('保存权限失败', err);
+            })
+            .finally(function() {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '保存权限设置';
+            });
+        }
+    </script>
+</body>
+</html>

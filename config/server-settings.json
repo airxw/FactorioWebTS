@@ -1,0 +1,22 @@
+{
+  "name": "【IEAC】webtest",
+  "description": "【IEAC】webtest【IEAC】webtest",
+  "tags": [
+    "111",
+    "11112"
+  ],
+  "visibility": {
+    "public": false,
+    "lan": true
+  },
+  "require_user_verification": false,
+  "ignore_player_limit_for_returning_players": false,
+  "auto_pause": true,
+  "only_admins_can_pause_the_game": false,
+  "autosave_only_on_server": false,
+  "non_blocking_saving": true,
+  "rcon_password": "factorio123",
+  "rcon_port": 27015,
+  "autosave_interval": 60,
+  "allow_commands": "admins-only"
+}

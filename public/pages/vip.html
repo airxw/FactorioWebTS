@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - VIP等级管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="vipApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">VIP等级管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click="loadAll()">刷新</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title">VIP等级管理</h3>
+                        <button class="btn btn-sm btn-primary" @click="openCreateLevel()">创建新等级</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>等级</th><th>等级名称</th><th>每日限购</th><th>单次限购</th><th>最高品质</th><th>特性</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <tr x-show="levels.length === 0"><td colspan="7" class="text-center">加载中...</td></tr>
+                                    <template x-for="l in levels" :key="l.id">
+                                        <tr>
+                                            <td x-text="l.level"></td>
+                                            <td x-text="l.name"></td>
+                                            <td x-text="l.daily_purchase_limit === -1 ? '无限' : l.daily_purchase_limit"></td>
+                                            <td x-text="l.single_purchase_limit === -1 ? '无限' : l.single_purchase_limit"></td>
+                                            <td x-text="l.max_quality_level ?? '-'"></td>
+                                            <td x-text="(l.features && l.features.length > 0) ? l.features.join(', ') : '-'"></td>
+                                            <td>
+                                                <button class="btn btn-sm btn-secondary" @click="openEditLevel(l)">编辑</button>
+                                                <button class="btn btn-sm btn-danger" @click="deleteLevel(l.id, l.name)">删除</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header"><h3 class="card-title">设置用户VIP</h3></div>
+                    <div class="card-body">
+                        <form @submit.prevent="setUserVip()">
+                            <div class="form-row">
+                                <div class="form-group" style="position:relative;"><label class="form-label">用户名</label><input type="text" class="form-control" x-model="vipForm.username" placeholder="输入用户名搜索..." required @input="searchUsernames()" @focus="searchUsernames()" @blur="closeUsernameSearch()" autocomplete="off"><div class="autocomplete-dropdown" x-show="usernameSearchOpen" @click.away="usernameSearchOpen = false" style="position:absolute;top:100%;left:0;right:0;z-index:1000;background:var(--color-surface,#fff);border:1px solid var(--color-border,#ddd);border-radius:4px;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);margin-top:2px;"><template x-for="u in usernameResults" :key="u.id"><div class="autocomplete-item" @mousedown.prevent="selectUsername(u)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--color-border,#eee);display:flex;justify-content:space-between;align-items:center;" @mouseenter="$el.style.background='var(--color-bg,#f5f5f5)'" @mouseleave="$el.style.background=''"><span x-text="u.username" style="font-weight:500;"></span><span x-text="u.name || ''" style="font-size:0.85em;color:var(--color-text-secondary,#888);"></span></div></template><div x-show="usernameResults.length === 0" style="padding:8px 12px;color:var(--color-text-secondary,#888);text-align:center;">无匹配用户</div></div></div>
+                                <div class="form-group"><label class="form-label">VIP等级</label>
+                                    <select class="form-control" x-model="vipForm.vip_level" required>
+                                        <option value="">请选择VIP等级</option>
+                                        <template x-for="l in levels" :key="l.id">
+                                            <option :value="l.level" x-text="l.name + ' (等级' + l.level + ')'"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label">有效期（天）</label><input type="number" class="form-control" x-model="vipForm.duration_days" min="1" required></div>
+                                <div class="form-group d-flex align-items-end"><button type="submit" class="btn btn-primary w-100">设置用户VIP</button></div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title">VIP列表</h3>
+                        <button class="btn btn-sm btn-secondary" @click="loadVipUsers()">刷新</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>用户名</th><th>VIP等级</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <tr x-show="vipUsers.length === 0"><td colspan="5" class="text-center">暂无VIP玩家</td></tr>
+                                    <template x-for="u in vipUsers" :key="u.id">
+                                        <tr>
+                                            <td x-text="u.username"></td>
+                                            <td x-text="u.vip_name || '等级' + u.vip_level"></td>
+                                            <td x-text="formatTs(u.vip_expiry)"></td>
+                                            <td><span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" x-text="u.status === 'active' ? '活跃' : '过期'"></span></td>
+                                            <td><button class="btn btn-sm btn-danger" @click="removeVip(u.username)">移除VIP</button></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showLevelModal" @click.self="showLevelModal = false" :style="{ display: showLevelModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 class="modal-title" x-text="editingLevel ? '编辑VIP等级' : '创建新VIP等级'"></h3><button class="modal-close" @click="showLevelModal = false">&times;</button></div>
+            <div class="modal-body">
+                <form @submit.prevent="saveLevel()">
+                    <div class="form-group"><label class="form-label">等级</label><input type="number" class="form-control" x-model="levelForm.level" min="1" :disabled="editingLevel !== null" required></div>
+                    <div class="form-group"><label class="form-label">等级名称</label><input type="text" class="form-control" x-model="levelForm.name" required></div>
+                    <div class="form-group"><label class="form-label">价格</label><input type="number" class="form-control" x-model="levelForm.price" min="0" required></div>
+                    <div class="form-group"><label class="form-label">每日限购次数</label><input type="number" class="form-control" x-model="levelForm.daily_purchase_limit" min="-1"></div>
+                    <div class="form-group"><label class="form-label">单次限购数量</label><input type="number" class="form-control" x-model="levelForm.single_purchase_limit" min="-1"></div>
+                    <div class="form-group"><label class="form-label">最高品质等级</label><input type="number" class="form-control" x-model="levelForm.max_quality_level" min="0"></div>
+                    <div class="form-group"><label class="form-label">描述</label><textarea class="form-control" x-model="levelForm.description" rows="3"></textarea></div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">保存</button>
+                        <button type="button" class="btn btn-secondary" @click="showLevelModal = false">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function vipApp() {
+      return {
+        levels: [],
+        vipUsers: [],
+        showLevelModal: false,
+        editingLevel: null,
+        levelForm: { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '' },
+        vipForm: { username: '', vip_level: '', duration_days: 30 },
+        usernameSearchTimeout: null,
+        usernameResults: [],
+        usernameSearchOpen: false,
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          var userInfo = TokenManager.getUserInfo();
+          if (!token) { window.location.href = 'login.html'; return; }
+          if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
+          this.loadAll();
+        },
+
+        loadAll() { this.loadLevels(); this.loadVipUsers(); },
+
+        async loadLevels() {
+          try {
+            var res = await fetch('/api/vip/levels');
+            var data = await res.json();
+            this.levels = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+        },
+
+        async loadVipUsers() {
+          try {
+            var res = await fetch('/api/vip/users', { headers: this.authHeaders() });
+            var data = await res.json();
+            this.vipUsers = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+        },
+
+        openCreateLevel() {
+          this.editingLevel = null;
+          this.levelForm = { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '' };
+          this.showLevelModal = true;
+        },
+
+        openEditLevel(l) {
+          this.editingLevel = l;
+          this.levelForm = {
+            level: l.level, name: l.name,
+            price: l.price ?? 0,
+            daily_purchase_limit: l.daily_purchase_limit ?? -1,
+            single_purchase_limit: l.single_purchase_limit ?? -1,
+            max_quality_level: l.max_quality_level ?? 0,
+            description: (l.features && l.features.length > 0) ? l.features[0] : ''
+          };
+          this.showLevelModal = true;
+        },
+
+        async saveLevel() {
+          if (!this.levelForm.name) { this.showToast('请输入等级名称', 'warning'); return; }
+          var url = '/api/vip/levels';
+          var method = 'POST';
+          if (this.editingLevel) { url += '/' + this.editingLevel.id; method = 'PUT'; }
+
+          var body = {
+            level: this.levelForm.level,
+            name: this.levelForm.name,
+            price: this.levelForm.price,
+            daily_purchase_limit: this.levelForm.daily_purchase_limit,
+            single_purchase_limit: this.levelForm.single_purchase_limit,
+            max_quality_level: this.levelForm.max_quality_level,
+            features: this.levelForm.description ? [this.levelForm.description] : []
+          };
+
+          try {
+            var res = await fetch(url, {
+              method: method, headers: this.authHeaders('application/json'),
+              body: JSON.stringify(body)
+            });
+            var data = await res.json();
+            this.showToast(data.success ? (this.editingLevel ? 'VIP等级已更新' : 'VIP等级已创建') : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.showLevelModal = false; this.loadLevels(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async deleteLevel(id, name) {
+          var confirmed = await window.showConfirm({ title: '删除VIP等级', content: '确定删除VIP等级"' + name + '"吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/vip/levels/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? 'VIP等级已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadAll();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        searchUsernames() {
+          var keyword = this.vipForm.username;
+          if (!keyword || keyword.length < 1) {
+            this.usernameResults = [];
+            this.usernameSearchOpen = false;
+            return;
+          }
+          clearTimeout(this.usernameSearchTimeout);
+          this.usernameSearchTimeout = setTimeout(() => {
+            this._doSearch(keyword);
+          }, 200);
+        },
+
+        async _doSearch(keyword) {
+          try {
+            var res = await fetch('/api/auth/users/search', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ keyword: keyword })
+            });
+            var data = await res.json();
+            this.usernameResults = (data.success && data.data) ? data.data : [];
+            this.usernameSearchOpen = this.usernameResults.length > 0;
+          } catch(e) {
+            this.usernameResults = [];
+            this.usernameSearchOpen = false;
+          }
+        },
+
+        selectUsername(user) {
+          this.vipForm.username = user.username;
+          this.usernameResults = [];
+          this.usernameSearchOpen = false;
+        },
+
+        closeUsernameSearch() {
+          setTimeout(() => { this.usernameSearchOpen = false; }, 200);
+        },
+
+        async setUserVip() {
+          if (!this.vipForm.username) { this.showToast('请输入用户名', 'warning'); return; }
+          if (!this.vipForm.vip_level) { this.showToast('请选择VIP等级', 'warning'); return; }
+          try {
+            var res = await fetch('/api/vip/set', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({
+                username: this.vipForm.username,
+                vip_level: Number(this.vipForm.vip_level),
+                duration_days: Number(this.vipForm.duration_days)
+              })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? 'VIP设置成功' : (data.error || '设置失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.vipForm.username = ''; this.vipForm.vip_level = ''; this.vipForm.duration_days = 30; this.loadVipUsers(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async removeVip(username) {
+          var confirmed = await window.showConfirm({ title: '移除VIP', content: '确定移除 ' + username + ' 的VIP权限吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/vip/set', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ username: username, vip_level: 0 })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? 'VIP已移除' : (data.error || '移除失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadVipUsers();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        formatTs(ts) {
+          if (!ts) return '-';
+          return new Date(ts * 1000).toLocaleString('zh-CN');
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

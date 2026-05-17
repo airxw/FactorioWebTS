@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 物品管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="itemsApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">物品管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" @click="syncFromGithub()" :disabled="syncing">
+                        <i class="bi" :class="syncing ? 'bi-arrow-repeat spin' : 'bi-github'"></i>
+                        <span x-text="syncing ? '同步中...' : '从GitHub同步'"></span>
+                    </button>
+                    <button class="btn btn-sm btn-primary" @click="openCreateItem()"><i class="bi bi-plus-lg me-1"></i>添加物品</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="card mb-4">
+                    <div class="card-toolbar">
+                        <span class="card-toolbar-title"><i class="bi bi-box-seam me-2"></i>物品列表</span>
+                        <div class="filter-bar">
+                            <div class="search-input"><i class="bi bi-search"></i><input type="text" placeholder="搜索物品..." x-model="searchQuery" @input="currentPage = 1"></div>
+                            <select x-model="filterCategory" @change="currentPage = 1">
+                                <option value="">全部分类</option>
+                                <template x-for="c in categories" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                            </select>
+                            <select x-model="filterStatus" @change="currentPage = 1">
+                                <option value="">全部状态</option><option value="active">已启用</option><option value="inactive">已禁用</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div x-show="items.length === 0 && !loading" class="empty-state-full">
+                        <div><i class="bi bi-github"></i></div>
+                        <div class="title">暂无物品数据</div>
+                        <div class="desc">请点击「从GitHub同步」按钮获取物品数据</div>
+                        <button class="btn btn-primary" @click="syncFromGithub()" :disabled="syncing">
+                            <i class="bi" :class="syncing ? 'bi-arrow-repeat spin' : 'bi-github'"></i>
+                            <span x-text="syncing ? '同步中...' : '从GitHub同步'"></span>
+                        </button>
+                    </div>
+                    <div class="table-responsive" x-show="items.length > 0 || loading">
+                        <table class="table mb-0">
+                            <thead><tr><th>ID</th><th>代码</th><th>中文名</th><th>英文名</th><th>分类</th><th>状态</th><th class="text-end">操作</th></tr></thead>
+                            <tbody>
+                                <tr x-show="loading"><td colspan="7" class="text-center text-muted p-4">加载中...</td></tr>
+                                <template x-for="item in pagedItems" :key="item.id">
+                                    <tr :class="{ 'table-row-disabled': !item.enabled }">
+                                        <td x-text="item.id"></td>
+                                        <td><code x-text="item.code"></code></td>
+                                        <td class="fw-medium" x-text="item.name_cn || '--'"></td>
+                                        <td><small class="text-muted" x-text="item.name_en || '--'"></small></td>
+                                        <td><span class="badge bg-secondary" x-text="catLabel(item.category)"></span></td>
+                                        <td><span class="status-badge-inline" :class="item.enabled ? 'active' : 'inactive'" x-text="item.enabled ? '启用' : '停用'"></span></td>
+                                        <td class="text-end">
+                                            <div class="action-btn-group justify-end">
+                                                <button class="btn-icon-sm edit" @click="openEditItem(item)"><i class="bi bi-pencil"></i></button>
+                                                <button class="btn-icon-sm delete" @click="deleteItem(item.id)"><i class="bi bi-trash"></i></button>
+                                                <button class="btn-icon-sm toggle" @click="toggleItem(item.id, item.enabled)"><i :class="item.enabled ? 'bi bi-pause' : 'bi bi-play'"></i></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination-bar" x-show="items.length > 0">
+                        <div class="text-muted">
+                            <span>共 <span x-text="filteredItems.length"></span> 个物品，</span>
+                            <span>每页</span>
+                            <select x-model="perPage" @change="currentPage = 1" class="form-select-sm">
+                                <option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option>
+                            </select>
+                        </div>
+                        <div class="pagination-controls">
+                            <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage <= 1" @click="currentPage--">&lt;</button>
+                            <span class="text-muted pagination-page-info">第 <span x-text="currentPage"></span> / <span x-text="totalPages || 1"></span> 页</span>
+                            <button class="btn btn-sm btn-outline-secondary" :disabled="currentPage >= totalPages" @click="currentPage++">&gt;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showItemModal" @click.self="showItemModal = false" :style="{ display: showItemModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 x-text="editingItem ? '编辑物品' : '添加物品'"></h3><button class="modal-close" @click="showItemModal = false">&times;</button></div>
+            <div class="modal-body">
+                <form @submit.prevent="saveItem()">
+                    <div class="form-group"><label class="form-label">物品代码 <span class="required-star">*</span></label><input type="text" class="form-control" x-model="itemForm.code" :disabled="editingItem !== null" placeholder="iron-plate"></div>
+                    <div class="form-group"><label class="form-label">中文名 <span style="color:#e74c3c;">*</span></label><input type="text" class="form-control" x-model="itemForm.name_cn" placeholder="铁板"></div>
+                    <div class="form-group"><label class="form-label">英文名</label><input type="text" class="form-control" x-model="itemForm.name_en" placeholder="Iron plate"></div>
+                    <div class="form-group"><label class="form-label">分类</label>
+                        <select class="form-control" x-model="itemForm.category">
+                            <option value="">-- 请选择 --</option>
+                            <template x-for="c in categories" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                        </select>
+                    </div>
+                    <div class="form-group"><label class="form-label">品质</label><input type="number" class="form-control" x-model="itemForm.quality_level" min="0"></div>
+                    <div class="form-group"><label class="form-label">状态</label>
+                        <select class="form-control" x-model="itemForm.enabled">
+                            <option value="1">启用</option><option value="0">禁用</option>
+                        </select>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">保存</button>
+                        <button type="button" class="btn btn-secondary" @click="showItemModal = false">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function itemsApp() {
+      return {
+        items: [],
+        categories: [],
+        searchQuery: '',
+        filterCategory: '',
+        filterStatus: '',
+        currentPage: 1,
+        perPage: 20,
+        showItemModal: false,
+        editingItem: null,
+        itemForm: { code: '', name_cn: '', name_en: '', category: '', quality_level: 0, enabled: '1' },
+        loading: false,
+        syncing: false,
+
+        init() {
+          var token = TokenManager.getToken();
+          var userInfo = TokenManager.getUserInfo();
+          if (!token) { window.location.href = 'login.html'; return; }
+          if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
+          SidebarMenu.initSidebarWithPermission();
+          this.loadAll();
+        },
+
+        async loadAll() {
+          this.loading = true;
+          try {
+            var res = await fetch('/api/shop/categories');
+            var data = await res.json();
+            this.categories = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+          try {
+            var res = await fetch('/api/shop/items');
+            var data = await res.json();
+            this.items = (data.success && data.data) ? data.data : [];
+          } catch(e) {} finally {
+            this.loading = false;
+          }
+        },
+
+        async syncFromGithub() {
+          if (this.syncing) return;
+          this.syncing = true;
+          try {
+            var res = await fetch('/api/shop/sync', { method: 'POST', headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success) {
+              this.showToast(`同步成功！共 ${data.count || 0} 个物品已更新`, 'success');
+              this.loadAll();
+            } else {
+              this.showToast(data.error || '同步失败', 'error');
+            }
+          } catch(e) {
+            this.showToast('同步失败：网络错误', 'error');
+          } finally {
+            this.syncing = false;
+          }
+        },
+
+        get filteredItems() {
+          var items = this.items;
+          var q = this.searchQuery.toLowerCase();
+          if (q) items = items.filter(function(i) { return (i.code||'').toLowerCase().indexOf(q)!==-1 || (i.name_cn||'').toLowerCase().indexOf(q)!==-1 || (i.name_en||'').toLowerCase().indexOf(q)!==-1; });
+          if (this.filterCategory) items = items.filter(function(i) { return i.category === this.filterCategory; }.bind(this));
+          if (this.filterStatus) items = items.filter(function(i) { return (i.enabled ? 'active' : 'inactive') === this.filterStatus; }.bind(this));
+          return items;
+        },
+
+        get totalPages() { return Math.max(1, Math.ceil(this.filteredItems.length / this.perPage)); },
+
+        get pagedItems() {
+          var start = (this.currentPage - 1) * this.perPage;
+          return this.filteredItems.slice(start, start + this.perPage);
+        },
+
+        catLabel(c) {
+          var map = { logistics:'物流', production:'生产', combat:'战斗', intermediate:'中间品', 'space-age':'太空时代', equipment:'装备', other:'其他' };
+          return map[c] || c || '其他';
+        },
+
+        openCreateItem() {
+          this.editingItem = null;
+          this.itemForm = { code: '', name_cn: '', name_en: '', category: '', quality_level: 0, enabled: '1' };
+          this.showItemModal = true;
+        },
+
+        openEditItem(item) {
+          this.editingItem = item;
+          this.itemForm = {
+            code: item.code, name_cn: item.name_cn || '', name_en: item.name_en || '',
+            category: item.category || '', quality_level: item.quality_level || 0, enabled: item.enabled ? '1' : '0'
+          };
+          this.showItemModal = true;
+        },
+
+        async saveItem() {
+          if (!this.itemForm.code) { this.showToast('请输入物品代码', 'warning'); return; }
+          if (!this.itemForm.name_cn) { this.showToast('请输入中文名', 'warning'); return; }
+          var payload = {
+            name_cn: this.itemForm.name_cn, name_en: this.itemForm.name_en,
+            category: this.itemForm.category, enabled: this.itemForm.enabled === '1',
+            price: 0, quality_level: parseInt(this.itemForm.quality_level) || 0
+          };
+
+          var url = '/api/shop/items';
+          var method = 'POST';
+          if (this.editingItem) { url += '/' + this.editingItem.id; method = 'PUT'; payload.code = this.itemForm.code; }
+
+          if (!this.editingItem) { payload.code = this.itemForm.code; }
+
+          try {
+            var res = await fetch(url, { method: method, headers: this.authHeaders('application/json'), body: JSON.stringify(payload) });
+            var data = await res.json();
+            this.showToast(data.success ? '保存成功' : (data.error || '保存失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.showItemModal = false; this.loadAll(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async deleteItem(id) {
+          var confirmed = await window.showConfirm({ title: '删除物品', content: '确定要删除这个物品吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/shop/items/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? '删除成功' : (data.error || '删除失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadAll();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async toggleItem(id, enabled) {
+          var item = this.items.find(function(i) { return i.id === id; });
+          if (!item) return;
+          var payload = { code: item.code, name_cn: item.name_cn || '', name_en: item.name_en || '', enabled: !enabled, price: 0, category: item.category || '', quality_level: item.quality_level || 0 };
+          try {
+            var res = await fetch('/api/shop/items/' + id, { method: 'PUT', headers: this.authHeaders('application/json'), body: JSON.stringify(payload) });
+            var data = await res.json();
+            this.showToast(data.success ? '状态已切换' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadAll();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

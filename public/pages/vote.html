@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 投票管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="voteApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">投票管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-warning" @click="processExpired()">处理过期投票</button>
+                    <button class="btn btn-sm btn-secondary" @click="loadVotes()">刷新</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="card mb-4">
+                    <div class="card-header"><h3 class="card-title">投票设置</h3></div>
+                    <div class="card-body">
+                        <form @submit.prevent="saveSettings()">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">通过阈值 (%)</label>
+                                    <input type="number" class="form-control" x-model="config.pass_ratio" min="1" max="100" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">最小投票数</label>
+                                    <input type="number" class="form-control" x-model="config.min_votes" min="1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">冷却时间 (秒)</label>
+                                    <input type="number" class="form-control" x-model="config.cooldown_seconds" min="0" required>
+                                </div>
+                                <div class="form-group d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary w-100">保存设置</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title">投票列表</h3>
+                        <select class="form-control" style="max-width:200px;" x-model="statusFilter" @change="loadVotes()">
+                            <option value="">全部状态</option>
+                            <option value="active">进行中</option>
+                            <option value="passed">已通过</option>
+                            <option value="failed">已失败</option>
+                            <option value="cancelled">已取消</option>
+                        </select>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>ID</th><th>发起人</th><th>目标</th><th>类型</th><th>赞成</th><th>反对</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    <tr x-show="votes.length === 0"><td colspan="9" class="text-center">加载中...</td></tr>
+                                    <template x-for="v in votes" :key="v.id">
+                                        <tr>
+                                            <td x-text="v.id"></td>
+                                            <td x-text="'user_' + v.initiator_id"></td>
+                                            <td x-text="v.target_player"></td>
+                                            <td x-text="v.type === 'kick' ? '踢出' : v.type"></td>
+                                            <td x-text="v.yes_votes"></td>
+                                            <td x-text="v.no_votes"></td>
+                                            <td><span class="badge" :class="statusBadge(v.status)" x-text="statusText(v.status)"></span></td>
+                                            <td x-text="formatTs(v.created_at)"></td>
+                                            <td>
+                                                <button class="btn btn-sm btn-info me-1" @click="showDetail(v.id)">详情</button>
+                                                <button class="btn btn-sm btn-danger me-1" @click="openBan(v.target_player)">封禁</button>
+                                                <button class="btn btn-sm btn-warning" x-show="v.status === 'active'" @click="cancelVote(v.id)">取消</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showDetailModal" @click.self="showDetailModal = false" :style="{ display: showDetailModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 class="modal-title">投票详情</h3><button class="modal-close" @click="showDetailModal = false">&times;</button></div>
+            <div class="modal-body">
+                <template x-if="detail">
+                    <div class="detail-grid">
+                        <div class="detail-item"><strong>投票ID:</strong> <span x-text="detail.id"></span></div>
+                        <div class="detail-item"><strong>发起人:</strong> <span x-text="'user_' + detail.initiator_id"></span></div>
+                        <div class="detail-item"><strong>目标:</strong> <span x-text="detail.target_player || '-'"></span></div>
+                        <div class="detail-item"><strong>类型:</strong> <span x-text="detail.type"></span></div>
+                        <div class="detail-item"><strong>赞成票:</strong> <span x-text="detail.yes_votes"></span></div>
+                        <div class="detail-item"><strong>反对票:</strong> <span x-text="detail.no_votes"></span></div>
+                        <div class="detail-item"><strong>状态:</strong> <span class="badge" :class="statusBadge(detail.status)" x-text="statusText(detail.status)"></span></div>
+                        <div class="detail-item"><strong>创建时间:</strong> <span x-text="formatTs(detail.created_at)"></span></div>
+                        <div class="detail-item" x-show="detail.voters && detail.voters.length > 0">
+                            <strong>投票记录:</strong>
+                            <template x-for="r in detail.voters" :key="r.player_name">
+                                <span class="badge me-1" :class="r.vote === 'yes' ? 'badge-success' : 'badge-danger'" x-text="r.player_name + ' (' + (r.vote === 'yes' ? '赞成' : '反对') + ')'"></span>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="showDetailModal = false">关闭</button>
+                <button class="btn btn-danger" @click="showDetailModal = false; openBan(detail?.target_player || '')" x-show="detail?.target_player">封禁玩家</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay modal-overlay-init" x-show="showBanModal" @click.self="showBanModal = false" :style="{ display: showBanModal ? 'flex' : 'none' }">
+        <div class="modal-dialog">
+            <div class="modal-header"><h3 class="modal-title">封禁玩家</h3><button class="modal-close" @click="showBanModal = false">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">玩家名称</label><input type="text" class="form-control" x-model="banTarget" readonly></div>
+                <div class="form-group"><label class="form-label">封禁原因</label><input type="text" class="form-control" x-model="banReason" placeholder="请输入封禁原因"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="showBanModal = false">取消</button>
+                <button class="btn btn-danger" @click="doBan()">确认封禁</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function voteApp() {
+      return {
+        config: { pass_ratio: 60, min_votes: 3, cooldown_seconds: 300 },
+        votes: [],
+        statusFilter: '',
+        showDetailModal: false,
+        showBanModal: false,
+        detail: null,
+        banTarget: '',
+        banReason: '',
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          if (!token) { window.location.href = 'login.html'; return; }
+          this.loadConfig();
+          this.loadVotes();
+        },
+
+        async loadConfig() {
+          try {
+            var res = await fetch('/api/vote/config');
+            var data = await res.json();
+            if (data.success && data.data) { this.config = data.data; }
+          } catch(e) {}
+        },
+
+        async saveSettings() {
+          try {
+            var res = await fetch('/api/vote/config', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify(this.config)
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '设置保存成功' : (data.error || '保存失败'), data.success ? 'success' : 'error');
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async loadVotes() {
+          try {
+            var params = this.statusFilter ? '?status=' + this.statusFilter : '';
+            var res = await fetch('/api/vote/list' + params, { headers: this.authHeaders() });
+            var data = await res.json();
+            this.votes = (data.success && data.data) ? data.data : [];
+          } catch(e) {}
+        },
+
+        async showDetail(id) {
+          try {
+            var res = await fetch('/api/vote/detail/' + id, { headers: this.authHeaders() });
+            var data = await res.json();
+            if (data.success) { this.detail = data.data; this.showDetailModal = true; }
+          } catch(e) {}
+        },
+
+        openBan(target) {
+          this.banTarget = target;
+          this.banReason = '';
+          this.showBanModal = true;
+        },
+
+        async doBan() {
+          if (!this.banReason.trim()) { this.showToast('请输入封禁原因', 'warning'); return; }
+          try {
+            var res = await fetch('/api/vote/ban', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ player_name: this.banTarget, reason: this.banReason })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '封禁成功' : (data.error || '封禁失败'), data.success ? 'success' : 'error');
+            if (data.success) { this.showBanModal = false; this.loadVotes(); }
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async cancelVote(id) {
+          var confirmed = await window.showConfirm({ title: '取消投票', content: '确定要取消这个投票吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetch('/api/vote/cancel', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ vote_id: id })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? '投票已取消' : (data.error || '取消失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadVotes();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        async processExpired() {
+          try {
+            var res = await fetch('/api/vote/process-expired', { method: 'POST', headers: this.authHeaders() });
+            var data = await res.json();
+            this.showToast(data.success ? data.message || '处理完成' : (data.error || '处理失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadVotes();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        statusBadge(s) {
+          var map = { active: 'badge-info', passed: 'badge-success', failed: 'badge-warning', cancelled: 'badge-danger' };
+          return map[s] || 'badge-info';
+        },
+
+        statusText(s) {
+          var map = { active: '进行中', passed: '已通过', failed: '已失败', cancelled: '已取消' };
+          return map[s] || s;
+        },
+
+        formatTs(ts) {
+          if (!ts) return '-';
+          return new Date(ts * 1000).toLocaleString('zh-CN');
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        }
+      };
+    }
+    </script>
+</body>
+</html>

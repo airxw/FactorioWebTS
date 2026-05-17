@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="ws-port" content="34799">
+    <title>FactorioWeb - 聊天设置</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">聊天设置</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadChatConfig()">刷新配置</button>
+                    <button class="btn btn-sm btn-danger" onclick="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="page-header">
+                    <div class="page-header-left">
+                        <h2><i class="bi bi-gear"></i>聊天设置与礼物配置</h2>
+                        <p>配置玩家加入/离开欢迎词、首次登录礼包及回归礼包配置</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="saveAllSettings()">
+                        <i class="bi bi-check-lg me-1"></i>保存所有设置
+                    </button>
+                </div>
+
+                <div class="setting-section">
+                    <div class="setting-section-header">
+                        <div class="setting-section-title">
+                            <div class="section-icon"><i class="bi bi-door-open"></i></div>
+                            <span>玩家加入/离开欢迎消息</span>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <span class="variable-hint" onclick="insertVariable('join','{player_name}')">{player_name}</span>
+                            <span class="variable-hint" onclick="insertVariable('join','{server_name}')">{server_name}</span>
+                            <span class="variable-hint" onclick="insertVariable('join','{online_count}')">{online_count}</span>
+                        </div>
+                    </div>
+                    <div class="setting-section-body">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1;">
+                                <label class="form-label">玩家加入欢迎消息</label>
+                                <textarea class="form-control" id="join-message" rows="2" placeholder="玩家加入时显示的欢迎消息..."></textarea>
+                                <div class="d-flex gap-2 mt-2 align-items-center">
+                                    <button class="btn btn-sm btn-secondary" onclick="previewMessage('join')"><i class="bi bi-eye me-1"></i>预览消息</button>
+                                    <label class="toggle-switch mb-0"><input type="checkbox" id="join-enabled" checked><span class="toggle-slider"></span><span class="toggle-label">已启用</span></label>
+                                </div>
+                                <div class="preview-box" id="join-preview"></div>
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label class="form-label">玩家离开告别消息</label>
+                                <textarea class="form-control" id="leave-message" rows="2" placeholder="玩家离开时显示的告别消息..."></textarea>
+                                <div class="d-flex gap-2 mt-2 align-items-center">
+                                    <button class="btn btn-sm btn-secondary" onclick="previewMessage('leave')"><i class="bi bi-eye me-1"></i>预览消息</button>
+                                    <label class="toggle-switch mb-0"><input type="checkbox" id="leave-enabled" checked><span class="toggle-slider"></span><span class="toggle-label">已启用</span></label>
+                                </div>
+                                <div class="preview-box" id="leave-preview"></div>
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label class="form-label">首次加入欢迎消息</label>
+                                <textarea class="form-control" id="first-join-message" rows="2" placeholder="新玩家第一次加入时显示的欢迎消息..."></textarea>
+                                <div class="d-flex gap-2 mt-2 align-items-center">
+                                    <button class="btn btn-sm btn-secondary" onclick="previewMessage('first-join')"><i class="bi bi-eye me-1"></i>预览消息</button>
+                                    <label class="toggle-switch mb-0"><input type="checkbox" id="first-join-enabled" checked><span class="toggle-slider"></span><span class="toggle-label">已启用</span></label>
+                                </div>
+                                <div class="preview-box" id="first-join-preview"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-section">
+                    <div class="setting-section-header">
+                        <div class="setting-section-title">
+                            <div class="section-icon gift"><i class="bi bi-gift"></i></div>
+                            <span>首次加入礼包</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="first-gift-enabled" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">已启用</span>
+                        </label>
+                    </div>
+                    <div class="setting-section-body">
+                        <p class="form-text mb-3">玩家第一次加入服务器时将自动发放以下物品作为欢迎礼包</p>
+                        <div class="gift-items-list" id="first-gift-list">
+                            <div class="gift-empty-hint" id="first-gift-empty">
+                                <i class="bi bi-box-seam"></i>
+                                暂无物品，请添加欢迎礼包物品
+                            </div>
+                        </div>
+                        <div class="add-item-row-modern">
+                            <button class="btn btn-primary btn-modern" onclick="openItemSelector('first')">
+                                <i class="bi bi-plus-lg me-2"></i>从物品库添加
+                            </button>
+                            <span class="item-add-hint">或手动填写：</span>
+                            <input type="text" class="form-control form-control-sm modern-input name-input" id="fg-item-name" placeholder="物品名称">
+                            <input type="text" class="form-control form-control-sm modern-input code-input" id="fg-item-code" placeholder="代码">
+                            <input type="number" class="form-control form-control-sm modern-input count-input" id="fg-item-count" value="1" min="1" placeholder="数量">
+                            <select class="form-select form-select-sm modern-select quality-select" id="fg-item-quality">
+                                <option value="normal">普通</option>
+                                <option value="uncommon">优良</option>
+                                <option value="rare">稀有</option>
+                                <option value="epic">史诗</option>
+                                <option value="legendary">传说</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-modern-sm" onclick="addGiftItem('first')"><i class="bi bi-check-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-section">
+                    <div class="setting-section-header">
+                        <div class="setting-section-title">
+                            <div class="section-icon relogin"><i class="bi bi-arrow-repeat"></i></div>
+                            <span>回归礼包</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="relogin-gift-enabled" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">已启用</span>
+                        </label>
+                    </div>
+                    <div class="setting-section-body">
+                        <p class="form-text mb-3">玩家离开一段时间后再次登录时发放的回归礼包</p>
+                        <div class="form-row mb-3">
+                            <div class="form-group">
+                                <label class="form-label">回归冷却时间</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="relogin-cooldown" value="24" min="0" placeholder="0表示无限制">
+                                    <span class="input-group-text">小时</span>
+                                </div>
+                                <div class="form-text">玩家需要离线多久以上才能领取回归礼包</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">每日可领取回归礼包次数</label>
+                                <input type="number" class="form-control" id="relogin-daily-limit" value="1" min="0" placeholder="0表示无限制">
+                                <div class="form-text">0表示无限制</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">总计可领取回归礼包次数</label>
+                                <input type="number" class="form-control" id="relogin-total-limit" value="0" min="0" placeholder="0表示无限制">
+                                <div class="form-text">0表示无限制</div>
+                            </div>
+                        </div>
+                        <div class="gift-items-list" id="relogin-gift-list">
+                            <div class="gift-empty-hint" id="relogin-gift-empty">
+                                <i class="bi bi-box-seam"></i>
+                                暂无物品，请添加回归礼包物品
+                            </div>
+                        </div>
+                        <div class="add-item-row-modern">
+                            <button class="btn btn-primary btn-modern" onclick="openItemSelector('relogin')">
+                                <i class="bi bi-plus-lg me-2"></i>从物品库添加
+                            </button>
+                            <span class="item-add-hint">或手动填写：</span>
+                            <input type="text" class="form-control form-control-sm modern-input name-input" id="rg-item-name" placeholder="物品名称">
+                            <input type="text" class="form-control form-control-sm modern-input code-input" id="rg-item-code" placeholder="代码">
+                            <input type="number" class="form-control form-control-sm modern-input count-input" id="rg-item-count" value="1" min="1" placeholder="数量">
+                            <select class="form-select form-select-sm modern-select quality-select" id="rg-item-quality">
+                                <option value="normal">普通</option>
+                                <option value="uncommon">优良</option>
+                                <option value="rare">稀有</option>
+                                <option value="epic">史诗</option>
+                                <option value="legendary">传说</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-modern-sm" onclick="addGiftItem('relogin')"><i class="bi bi-check-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="itemSelectorModal">
+        <div class="modal-box modal-large">
+            <div class="modal-box-header">
+                <h3><i class="bi bi-list-ul" style="color:var(--primary-color);"></i>物品选择器</h3>
+                <button class="modal-box-close" onclick="closeItemSelector()">&times;</button>
+            </div>
+            <div class="modal-box-body">
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <div class="input-group" style="max-width: 400px; flex:1;">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="item-search-input" placeholder="搜索物品名称或代码..." oninput="filterItems()">
+                        <button class="btn btn-outline-secondary" onclick="clearItemSearch()" title="清除搜索"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <label class="toggle-switch mb-0">
+                            <input type="checkbox" id="select-all-items" onchange="toggleSelectAll()">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">全选</span>
+                        </label>
+                        <span class="badge badge-info" id="selected-count-badge">已选: 0</span>
+                    </div>
+                </div>
+
+                <div class="item-selector-grid" id="item-selector-grid">
+                    <div class="text-center p-4">
+                        <i class="bi bi-hourglass-split" style="font-size:2rem;color:var(--gray-color);"></i>
+                        <p class="mt-2">正在加载物品数据...</p>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top flex-wrap gap-2">
+                    <div class="selected-preview" id="selected-preview">
+                        <strong>已选择:</strong> <span id="selected-count">0</span> 个物品
+                    </div>
+                    <div class="selected-tags" id="selected-tags"></div>
+                </div>
+            </div>
+            <div class="modal-box-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeItemSelector()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="addSelectedItems()" id="add-selected-btn" disabled>
+                    <i class="bi bi-plus-lg me-1"></i>添加选中的物品(<span id="selected-count-btn">0</span>)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+    <script>
+        var firstGiftItems = [];
+        var reloginGiftItems = [];
+        var originalFirstGiftItems = [];
+        var originalReloginGiftItems = [];
+        var allItems = [];
+        var selectedItems = new Set();
+        var currentSelectorType = 'first';
+        var hasUnsavedChanges = false;
+
+        var QUALITY_LEVEL_MAP = {
+            1: 'normal',
+            2: 'uncommon',
+            3: 'rare',
+            4: 'epic',
+            5: 'legendary'
+        };
+
+        var QUALITY_LABELS = {
+            normal: '普通',
+            uncommon: '优良',
+            rare: '稀有',
+            epic: '史诗',
+            legendary: '传说'
+        };
+
+        var QUALITY_COLORS = {
+            normal: '#6c757d',
+            uncommon: '#17a2b8',
+            rare: '#007bff',
+            epic: '#6f42c1',
+            legendary: '#e67e22'
+        };
+
+        function convertQualityLevel(level) {
+            if (typeof level === 'string' && QUALITY_LABELS[level]) {
+                return level;
+            }
+            var numLevel = parseInt(level) || 1;
+            return QUALITY_LEVEL_MAP[numLevel] || 'normal';
+        }
+
+        function getQualityLabel(quality) {
+            var q = convertQualityLevel(quality);
+            return QUALITY_LABELS[q] || '普通';
+        }
+
+        function getQualityColor(quality) {
+            var q = convertQualityLevel(quality);
+            return QUALITY_COLORS[q] || QUALITY_COLORS.normal;
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({
+                requireAuth: true,
+                onValid: function(userData) {
+                    if (userData.role !== 'admin') {
+                        showToast('权限不足，只有管理员才能访问此页面', 'error');
+                        setTimeout(function() {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        return;
+                    }
+                    SidebarMenu.initSidebarWithPermission();
+                    loadChatConfig();
+                    setupUnsavedChangesProtection();
+                }
+            });
+        });
+
+        function setupUnsavedChangesProtection() {
+            window.addEventListener('beforeunload', function(e) {
+                if (hasUnsavedChanges) {
+                    var message = '您有未保存的更改，确定要离开吗？';
+                    e.preventDefault();
+                    e.returnValue = message;
+                    return message;
+                }
+            });
+
+            var formElements = document.querySelectorAll('input, textarea, select');
+            formElements.forEach(function(el) {
+                el.addEventListener('change', markAsChanged);
+                el.addEventListener('input', markAsChanged);
+            });
+        }
+
+        function markAsChanged() {
+            if (!hasUnsavedChanges) {
+                hasUnsavedChanges = true;
+                updateSaveButtonState();
+            }
+        }
+
+        function updateSaveButtonState() {
+            var saveBtn = document.querySelector('.page-header button.btn-primary');
+            if (saveBtn) {
+                if (hasUnsavedChanges) {
+                    saveBtn.classList.add('btn-pulse');
+                    saveBtn.innerHTML = '<i class="bi bi-exclamation-lg me-1"></i>保存所有设置 *';
+                } else {
+                    saveBtn.classList.remove('btn-pulse');
+                    saveBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>保存所有设置';
+                }
+            }
+        }
+
+        function insertVariable(type, variable) {
+            var el = document.getElementById(type + '-message');
+            if (!el) return;
+            var s = el.selectionStart, e = el.selectionEnd;
+            el.value = el.value.substring(0, s) + variable + el.value.substring(e);
+            el.selectionStart = el.selectionEnd = s + variable.length;
+            el.focus();
+        }
+
+        function previewMessage(type) {
+            var val = document.getElementById(type + '-message').value || getDefaultTemplate(type);
+            var preview = val
+                .replace(/\{player_name\}/g, '<strong style="color:var(--primary-color)">示例玩家</strong>')
+                .replace(/\{server_name\}/g, '<strong style="color:#3498db">Factorio Server</strong>')
+                .replace(/\{online_count\}/g, '<strong style="color:var(--secondary-color)">12</strong>');
+            var box = document.getElementById(type + '-preview');
+            box.innerHTML = '消息预览: ' + preview;
+            box.classList.add('show');
+        }
+
+        function getDefaultTemplate(type) {
+            var templates = {
+                join: '欢迎 {player_name} 加入服务器!',
+                leave: '再见 {player_name}，期待下次再见！',
+                'first-join': '欢迎新玩家 {player_name} 首次加入服务器！'
+            };
+            return templates[type] || '';
+        }
+
+        async function loadChatConfig() {
+            try {
+                var response = await fetchAPI('/api/chat/settings');
+                var data = await response.json();
+                if (!data || !data.success) return;
+
+                var cfg = data.data || {};
+                document.getElementById('join-message').value = cfg.join_message || '欢迎 {player_name} 加入服务器!';
+                document.getElementById('leave-message').value = cfg.leave_message || '再见 {player_name}，期待下次再见！';
+                document.getElementById('first-join-message').value = cfg.first_join_message || '欢迎新玩家 {player_name} 首次加入服务器！';
+                document.getElementById('join-enabled').checked = Boolean(cfg.join_enabled !== 0);
+                document.getElementById('leave-enabled').checked = Boolean(cfg.leave_enabled !== 0);
+                document.getElementById('first-join-enabled').checked = Boolean(cfg.first_join_enabled !== 0);
+                document.getElementById('first-gift-enabled').checked = Boolean(cfg.first_gift_enabled !== 0);
+                document.getElementById('relogin-gift-enabled').checked = Boolean(cfg.relogin_gift_enabled !== 0);
+                document.getElementById('relogin-cooldown').value = cfg.relogin_cooldown || 24;
+                document.getElementById('relogin-daily-limit').value = cfg.relogin_daily_limit || 1;
+                document.getElementById('relogin-total-limit').value = cfg.relogin_total_limit || 0;
+
+                if (cfg.first_gift_items && cfg.first_gift_items.trim() !== '' && cfg.first_gift_items !== '[]') {
+                    try {
+                        firstGiftItems = typeof cfg.first_gift_items === 'string' ? JSON.parse(cfg.first_gift_items) : cfg.first_gift_items;
+                        if (!Array.isArray(firstGiftItems)) firstGiftItems = [];
+                    } catch (e) {
+                        console.error('解析 first_gift_items 失败:', e);
+                        firstGiftItems = [];
+                    }
+                } else {
+                    firstGiftItems = []
+                }
+
+                if (cfg.relogin_gift_items && cfg.relogin_gift_items.trim() !== '' && cfg.relogin_gift_items !== '[]') {
+                    try {
+                        reloginGiftItems = typeof cfg.relogin_gift_items === 'string' ? JSON.parse(cfg.relogin_gift_items) : cfg.relogin_gift_items;
+                        if (!Array.isArray(reloginGiftItems)) reloginGiftItems = [];
+                    } catch (e) {
+                        console.error('解析 relogin_gift_items 失败:', e);
+                        reloginGiftItems = [];
+                    }
+                } else {
+                    reloginGiftItems = [];
+                }
+
+                originalFirstGiftItems = JSON.parse(JSON.stringify(firstGiftItems));
+                originalReloginGiftItems = JSON.parse(JSON.stringify(reloginGiftItems));
+
+                hasUnsavedChanges = false;
+                updateSaveButtonState();
+
+                renderGiftList('first');
+                renderGiftList('relogin');
+
+                showToast('配置加载成功', 'success');
+            } catch (e) {
+                console.error('加载聊天配置失败', e);
+                showToast('加载配置失败', 'error');
+            }
+        }
+
+        function addGiftItem(type) {
+            var prefix = type === 'first' ? 'fg' : 'rg';
+            var name = document.getElementById(prefix + '-item-name').value.trim();
+            var code = document.getElementById(prefix + '-item-code').value.trim();
+            var count = parseInt(document.getElementById(prefix + '-item-count').value) || 1;
+            var quality = document.getElementById(prefix + '-item-quality').value || 'normal';
+
+            if (!name || !code) {
+                showToast('请填写物品名称和代码', 'warning');
+                return;
+            }
+
+            if (type === 'first') {
+                firstGiftItems.push({ name: name, code: code, count: count, quality: quality });
+            } else {
+                reloginGiftItems.push({ name: name, code: code, count: count, quality: quality });
+            }
+
+            document.getElementById(prefix + '-item-name').value = '';
+            document.getElementById(prefix + '-item-code').value = '';
+            document.getElementById(prefix + '-item-count').value = '1';
+            document.getElementById(prefix + '-item-quality').value = 'normal';
+
+            renderGiftList(type);
+            markAsChanged();
+        }
+
+        function removeGiftItem(type, index) {
+            if (type === 'first') {
+                firstGiftItems.splice(index, 1);
+                renderGiftList('first');
+            } else {
+                reloginGiftItems.splice(index, 1);
+                renderGiftList('relogin');
+            }
+            markAsChanged();
+        }
+
+        function updateGiftCount(type, index, value) {
+            if (type === 'first') {
+                firstGiftItems[index].count = parseInt(value) || 1;
+            } else {
+                reloginGiftItems[index].count = parseInt(value) || 1;
+            }
+            markAsChanged();
+        }
+
+        function updateGiftQuality(type, index, quality) {
+            if (type === 'first') {
+                firstGiftItems[index].quality = quality;
+            } else {
+                reloginGiftItems[index].quality = quality;
+            }
+            markAsChanged();
+        }
+
+        function renderGiftList(type) {
+            var listEl = type === 'first' ? document.getElementById('first-gift-list') : document.getElementById('relogin-gift-list');
+            var emptyEl = type === 'first' ? document.getElementById('first-gift-empty') : document.getElementById('relogin-gift-empty');
+            var items = type === 'first' ? firstGiftItems : reloginGiftItems;
+
+            var rows = listEl.querySelectorAll('.gift-item-row');
+            rows.forEach(function(row) { row.remove(); });
+
+            if (items.length === 0) {
+                emptyEl.style.display = 'block';
+                return;
+            }
+            emptyEl.style.display = 'none';
+
+            var qValues = ['normal', 'uncommon', 'rare', 'epic', 'legendary'];
+
+            items.forEach(function(item, index) {
+                var iconClass = type === 'relogin' ? ' relogin' : '';
+                var qualityKey = convertQualityLevel(item.quality);
+                var qualityColor = getQualityColor(qualityKey);
+                var qualityLabel = getQualityLabel(qualityKey);
+                var qualityOptions = qValues.map(function(q) {
+                    var selected = qualityKey === q ? 'selected' : '';
+                    return '<option value="' + q + '" ' + selected + '>' + QUALITY_LABELS[q] + '</option>';
+                }).join('');
+
+                var row = document.createElement('div');
+                row.className = 'gift-item-row';
+                row.innerHTML =
+                    '<div class="gift-item-icon' + iconClass + '" style="border-left: 3px solid ' + qualityColor + ';"><i class="bi bi-box-seam"></i></div>' +
+                    '<div class="gift-item-info">' +
+                        '<div class="gift-item-name">' + escapeHtml(item.name) + '</div>' +
+                        '<div class="gift-item-meta">' +
+                            '<span class="gift-item-code">' + escapeHtml(item.code) + '</span>' +
+                            '<span class="quality-badge" style="background:' + qualityColor + '20;color:' + qualityColor + ';border:1px solid ' + qualityColor + '40;">' + qualityLabel + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="gift-item-controls">' +
+                        '<span style="color:var(--gray-color);font-size:var(--font-size-sm);">x</span>' +
+                        '<input type="number" class="form-control form-control-sm gift-count-input" value="' + item.count + '" min="1" onchange="updateGiftCount(\'' + type + '\',' + index + ',this.value)">' +
+                        '<select class="form-select form-select-sm gift-quality-select" onchange="updateGiftQuality(\'' + type + '\',' + index + ',this.value)">' + qualityOptions + '</select>' +
+                        '<button class="btn btn-sm btn-outline-danger gift-remove-btn" onclick="removeGiftItem(\'' + type + '\',' + index + ')"><i class="bi bi-trash"></i></button>' +
+                    '</div>';
+                listEl.insertBefore(row, emptyEl);
+            });
+        }
+
+        function openItemSelector(type) {
+            currentSelectorType = type;
+            selectedItems.clear();
+            document.getElementById('item-search-input').value = '';
+            document.getElementById('select-all-items').checked = false;
+            updateSelectedCount();
+            updateSelectAllState();
+            renderSelectedTags();
+            document.getElementById('itemSelectorModal').classList.add('show');
+            loadItemsToSelector();
+        }
+
+        function closeItemSelector() {
+            document.getElementById('itemSelectorModal').classList.remove('show');
+        }
+
+        async function loadItemsToSelector() {
+            try {
+                var response = await fetchAPI('/api/shop/items');
+                var data = await response.json();
+                allItems = (data.success && data.data) || [];
+                renderItemSelectorGrid(allItems);
+            } catch (e) {
+                    document.getElementById('item-selector-grid').innerHTML =
+                        '<div class="text-center p-4" style="color:var(--danger-color);">' +
+                        '<i class="bi bi-exclamation-triangle" style="font-size:2rem;"></i>' +
+                        '<p class="mt-2">加载物品失败: ' + escapeHtml(e.message) + '</p></div>';
+            }
+        }
+
+        function renderItemSelectorGrid(items) {
+            var grid = document.getElementById('item-selector-grid');
+            grid.innerHTML = '';
+
+            if (items.length === 0) {
+                grid.innerHTML = '<div class="text-center p-4"><i class="bi bi-inbox" style="font-size:2rem;color:var(--gray-color);"></i><p class="mt-2">暂无可用物品</p></div>';
+                return;
+            }
+
+            items.forEach(function(item, idx) {
+                var isSelected = selectedItems.has(item.code);
+                var card = document.createElement('div');
+                card.className = 'item-card' + (isSelected ? ' selected' : '');
+                card.dataset.code = item.code;
+
+                var qualityKey = convertQualityLevel(item.quality_level);
+                var qualityColor = getQualityColor(qualityKey);
+                var qualityLabel = getQualityLabel(qualityKey);
+
+                card.innerHTML =
+                    '<div class="item-card-checkbox">' +
+                        '<input type="checkbox" id="item-chk-' + idx + '" ' + (isSelected ? 'checked' : '') + '>' +
+                    '</div>' +
+                    '<div class="item-card-icon">' +
+                        '<i class="bi bi-box-seam"></i>' +
+                    '</div>' +
+                    '<div class="item-card-info">' +
+                        '<div class="item-card-name" title="' + escapeHtml(item.name || item.code) + '">' + escapeHtml(item.name || item.code) + '</div>' +
+                        '<div class="item-card-code">' + escapeHtml(item.code) + '</div>' +
+                    '</div>' +
+                    '<div class="item-card-quality">' +
+                        '<span class="quality-dot" style="background:' + qualityColor + ';"></span>' +
+                        '<span>' + qualityLabel + '</span>' +
+                    '</div>';
+
+                card.onclick = (function(code, cardEl) {
+                    return function(e) {
+                        if (e.target.type !== 'checkbox') {
+                            toggleItemSelection(code, cardEl);
+                        }
+                    };
+                })(item.code, card);
+
+                var checkbox = card.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', (function(code, cardEl) {
+                    return function(e) {
+                        e.stopPropagation();
+                        toggleItemSelection(code, cardEl);
+                    };
+                })(item.code, card));
+
+                grid.appendChild(card);
+            });
+        }
+
+        function clearItemSearch() {
+            document.getElementById('item-search-input').value = '';
+            filterItems();
+        }
+
+        function filterItems() {
+            var query = document.getElementById('item-search-input').value.toLowerCase().trim();
+            if (!query) {
+                renderItemSelectorGrid(allItems);
+                return;
+            }
+            var filtered = allItems.filter(function(item) {
+                return (item.name && item.name.toLowerCase().includes(query)) ||
+                       (item.code && item.code.toLowerCase().includes(query));
+            });
+            renderItemSelectorGrid(filtered);
+        }
+
+        function toggleItemSelection(code, cardEl) {
+            if (selectedItems.has(code)) {
+                selectedItems.delete(code);
+                if (cardEl) cardEl.classList.remove('selected');
+                var checkbox = cardEl ? cardEl.querySelector('input[type="checkbox"]') : null;
+                if (checkbox) checkbox.checked = false;
+            } else {
+                selectedItems.add(code);
+                if (cardEl) cardEl.classList.add('selected');
+                var checkbox = cardEl ? cardEl.querySelector('input[type="checkbox"]') : null;
+                if (checkbox) checkbox.checked = true;
+            }
+            updateSelectedCount();
+            updateSelectAllState();
+            renderSelectedTags();
+        }
+
+        function toggleSelectAll() {
+            var isChecked = document.getElementById('select-all-items').checked;
+            var visibleItems = getVisibleItems();
+            if (isChecked) {
+                visibleItems.forEach(function(item) { selectedItems.add(item.code); });
+            } else {
+                visibleItems.forEach(function(item) { selectedItems.delete(item.code); });
+            }
+            renderItemSelectorGrid(visibleItems);
+            updateSelectedCount();
+            renderSelectedTags();
+        }
+
+        function getVisibleItems() {
+            var query = document.getElementById('item-search-input').value.toLowerCase().trim();
+            if (!query) return allItems;
+            return allItems.filter(function(item) {
+                return (item.name && item.name.toLowerCase().includes(query)) ||
+                       (item.code && item.code.toLowerCase().includes(query));
+            });
+        }
+
+        function updateSelectAllState() {
+            var visibleItems = getVisibleItems();
+            var allSelected = visibleItems.length > 0 && visibleItems.every(function(item) { return selectedItems.has(item.code); });
+            var someSelected = visibleItems.some(function(item) { return selectedItems.has(item.code); });
+            var checkbox = document.getElementById('select-all-items');
+            checkbox.checked = allSelected;
+            checkbox.indeterminate = someSelected && !allSelected;
+        }
+
+        function updateSelectedCount() {
+            var count = selectedItems.size;
+            document.getElementById('selected-count').textContent = count;
+            document.getElementById('selected-count-btn').textContent = count;
+            document.getElementById('selected-count-badge').textContent = '已选: ' + count;
+
+            var addBtn = document.getElementById('add-selected-btn');
+            addBtn.disabled = count === 0;
+        }
+
+        function renderSelectedTags() {
+            var tagsContainer = document.getElementById('selected-tags');
+            tagsContainer.innerHTML = '';
+
+            if (selectedItems.size === 0) {
+                tagsContainer.innerHTML = '<span style="color:var(--gray-color);font-size:var(--font-size-sm);">未选择任何物品</span>';
+                return;
+            }
+
+            var itemsToShow = Array.from(selectedItems).slice(0, 5);
+            itemsToShow.forEach(function(code) {
+                var item = allItems.find(function(i) { return i.code === code; });
+                if (!item) return;
+
+                var tag = document.createElement('span');
+                tag.className = 'selected-tag';
+                tag.innerHTML =
+                    escapeHtml(item.name || code) +
+                    '<button type="button" onclick="event.stopPropagation(); removeSelectedItem(\'' + escapeHtml(code).replace(/'/g, "\\'") + '\')">&times;</button>';
+                tagsContainer.appendChild(tag);
+            });
+
+            if (selectedItems.size > 5) {
+                var more = document.createElement('span');
+                more.className = 'selected-tag-more';
+                more.textContent = '+' + (selectedItems.size - 5) + ' 更多';
+                tagsContainer.appendChild(more);
+            }
+        }
+
+        function removeSelectedItem(code) {
+            selectedItems.delete(code);
+            var visibleItems = getVisibleItems();
+            renderItemSelectorGrid(visibleItems);
+            updateSelectedCount();
+            updateSelectAllState();
+            renderSelectedTags();
+        }
+
+        function addSelectedItems() {
+            if (selectedItems.size === 0) {
+                showToast('请选择要添加的物品', 'warning');
+                return;
+            }
+            var targetArray = currentSelectorType === 'first' ? firstGiftItems : reloginGiftItems;
+            selectedItems.forEach(function(code) {
+                var item = allItems.find(function(i) { return i.code === code; });
+                if (item) {
+                    targetArray.push({
+                        name: item.name || item.code,
+                        code: item.code,
+                        count: 1,
+                        quality: convertQualityLevel(item.quality_level)
+                    });
+                }
+            });
+            renderGiftList(currentSelectorType);
+            closeItemSelector();
+            showToast('成功添加 ' + selectedItems.size + ' 个物品，请记得保存设置', 'success');
+            selectedItems.clear();
+            markAsChanged();
+        }
+
+        async function saveAllSettings() {
+            var settings = {
+                join_message: document.getElementById('join-message').value,
+                leave_message: document.getElementById('leave-message').value,
+                first_join_message: document.getElementById('first-join-message').value,
+                join_enabled: document.getElementById('join-enabled').checked ? 1 : 0,
+                leave_enabled: document.getElementById('leave-enabled').checked ? 1 : 0,
+                first_join_enabled: document.getElementById('first-join-enabled').checked ? 1 : 0,
+                first_gift_enabled: document.getElementById('first-gift-enabled').checked ? 1 : 0,
+                first_gift_items: JSON.stringify(firstGiftItems),
+                relogin_gift_enabled: document.getElementById('relogin-gift-enabled').checked ? 1 : 0,
+                relogin_cooldown: parseInt(document.getElementById('relogin-cooldown').value) || 0,
+                relogin_daily_limit: parseInt(document.getElementById('relogin-daily-limit').value) || 0,
+                relogin_total_limit: parseInt(document.getElementById('relogin-total-limit').value) || 0,
+                relogin_gift_items: JSON.stringify(reloginGiftItems)
+            };
+
+            try {
+                var saveBtn = document.querySelector('.page-header button.btn-primary');
+                if (saveBtn) {
+                    saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>保存中...';
+                }
+
+                var response = await fetchAPI('/api/chat/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                var data = await response.json();
+
+                if (data.success) {
+                    originalFirstGiftItems = JSON.parse(JSON.stringify(firstGiftItems));
+                    originalReloginGiftItems = JSON.parse(JSON.stringify(reloginGiftItems));
+                    hasUnsavedChanges = false;
+                    updateSaveButtonState();
+                    showToast('✅ 聊天设置已成功保存到数据库！', 'success');
+                } else {
+                    showToast('❌ 保存失败: ' + (data.error || '未知错误'), 'error');
+                    if (saveBtn) {
+                        saveBtn.disabled = false;
+                        saveBtn.innerHTML = '<i class="bi bi-exclamation-lg me-1"></i>保存所有设置 *';
+                    }
+                }
+            } catch (e) {
+                showToast('❌ 保存失败: ' + e.message, 'error');
+                var saveBtn = document.querySelector('.page-header button.btn-primary');
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="bi bi-exclamation-lg me-1"></i>保存所有设置 *';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 登录</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+    <style>
+    .auth-container {
+        background: linear-gradient(135deg, #1a0a00 0%, #2d1a0a 30%, #3b1f0a 60%, #1a0a00 100%);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .auth-container::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(ellipse at 30% 20%, rgba(230, 126, 34, 0.06) 0%, transparent 60%),
+                    radial-gradient(ellipse at 70% 80%, rgba(39, 174, 96, 0.04) 0%, transparent 60%);
+        pointer-events: none;
+    }
+
+    .auth-card {
+        position: relative;
+        z-index: 1;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(230, 126, 34, 0.08);
+        border: 1px solid rgba(230, 126, 34, 0.12);
+        background: linear-gradient(180deg, rgba(30, 20, 10, 0.98) 0%, rgba(25, 15, 8, 0.98) 100%);
+        backdrop-filter: blur(10px);
+    }
+
+    .auth-gear-icon {
+        margin-bottom: 6px;
+        color: var(--primary-color);
+        opacity: 0.7;
+        animation: loginGearSpin 20s linear infinite;
+        display: flex;
+        justify-content: center;
+    }
+
+    @keyframes loginGearSpin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    .auth-header h1 {
+        background: linear-gradient(135deg, #e67e22 0%, #f39c12 50%, #e67e22 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .auth-header p {
+        color: rgba(255, 255, 255, 0.5);
+    }
+
+    .form-control {
+        background-color: rgba(20, 14, 8, 0.6);
+        border: 1px solid rgba(230, 126, 34, 0.2);
+        border-radius: 8px;
+        color: #e0d8cc;
+        transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+    }
+
+    .form-control:hover {
+        border-color: rgba(230, 126, 34, 0.35);
+        background-color: rgba(25, 18, 10, 0.7);
+    }
+
+    .form-control:focus {
+        border-color: #e67e22;
+        box-shadow: 0 0 0 3px rgba(230, 126, 34, 0.15), 0 0 20px rgba(230, 126, 34, 0.06);
+        background-color: rgba(30, 20, 12, 0.8);
+    }
+
+    .form-control::placeholder {
+        color: rgba(224, 216, 204, 0.35);
+    }
+
+    .form-label {
+        color: #b8a890;
+        font-weight: 500;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+        border: none;
+        border-radius: 8px;
+        box-shadow: 0 4px 14px rgba(230, 126, 34, 0.3);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(230, 126, 34, 0.4);
+    }
+
+    .btn-primary:active {
+        transform: translateY(0);
+    }
+
+    .auth-tabs {
+        border-bottom-color: rgba(230, 126, 34, 0.2);
+    }
+
+    .auth-tab {
+        color: rgba(184, 168, 144, 0.6);
+        transition: color 0.3s ease;
+    }
+
+    .auth-tab:hover {
+        color: #e0d8cc;
+    }
+
+    .auth-tab.active {
+        color: #e67e22;
+        border-bottom-color: #e67e22;
+    }
+
+    .toast-container {
+        z-index: 1000;
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        max-width: 360px;
+    }
+
+    [data-theme="dark"] .auth-container {
+        background: linear-gradient(135deg, #1a0a00 0%, #2d1a0a 30%, #3b1f0a 60%, #1a0a00 100%);
+    }
+
+    [data-theme="dark"] .auth-card {
+        background: linear-gradient(180deg, rgba(30, 20, 10, 0.98) 0%, rgba(25, 15, 8, 0.98) 100%);
+    }
+
+    [data-theme="dark"] .auth-header h1 {
+        background: linear-gradient(135deg, #e67e22 0%, #f39c12 50%, #e67e22 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    </style>
+</head>
+<body x-data="authApp()" x-init="checkSession()">
+    <div class="auth-container">
+        <div class="auth-card animate-scale-in">
+            <div class="auth-header">
+                <div class="auth-gear-icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51z"></path>
+                    </svg>
+                </div>
+                <div class="auth-logo">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon>
+                        <line x1="12" y1="22" x2="12" y2="15.5"></line>
+                        <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+                    </svg>
+                </div>
+                <h1>FactorioWeb</h1>
+                <p>Factorio Server Manager</p>
+            </div>
+
+            <div class="auth-tabs">
+                <button class="auth-tab" :class="{ active: tab === 'login' }" @click="tab = 'login'">登录</button>
+                <button class="auth-tab" :class="{ active: tab === 'register' }" @click="tab = 'register'">注册</button>
+            </div>
+
+            <template x-if="tab === 'login'">
+                <form class="auth-form animate-fade-in" @submit.prevent="doLogin()">
+                    <div class="form-group">
+                        <label class="form-label" for="login-username">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                            用户名
+                        </label>
+                        <input type="text" id="login-username" class="form-control" x-model="loginUsername" placeholder="输入用户名" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="login-password">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                            密码
+                        </label>
+                        <input type="password" id="login-password" class="form-control" x-model="loginPassword" placeholder="输入密码" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+                        <span x-show="!loading">登录</span>
+                        <span x-show="loading" class="btn-loading-text">
+                            <span class="spinner-sm"></span> 登录中...
+                        </span>
+                    </button>
+                </form>
+            </template>
+
+            <template x-if="tab === 'register'">
+                <form class="auth-form animate-fade-in" @submit.prevent="doRegister()">
+                    <div class="form-group">
+                        <label class="form-label" for="register-username">用户名</label>
+                        <input type="text" id="register-username" class="form-control" x-model="regUsername" placeholder="3-32位字母数字下划线" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="register-password">密码</label>
+                        <input type="password" id="register-password" class="form-control" x-model="regPassword" placeholder="至少6位密码" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="register-confirm">确认密码</label>
+                        <input type="password" id="register-confirm" class="form-control" x-model="regConfirm" placeholder="再次输入密码" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="register-name">昵称（可选）</label>
+                        <input type="text" id="register-name" class="form-control" x-model="regName" placeholder="输入昵称">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+                        <span x-show="!loading">注册</span>
+                        <span x-show="loading" class="btn-loading-text">
+                            <span class="spinner-sm"></span> 注册中...
+                        </span>
+                    </button>
+                </form>
+            </template>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/app.js"></script>
+    <script>
+    function authApp() {
+      return {
+        tab: 'login',
+        loginUsername: '',
+        loginPassword: '',
+        regUsername: '',
+        regPassword: '',
+        regConfirm: '',
+        regName: '',
+        loading: false,
+
+        checkSession() {
+          var token = TokenManager.getToken();
+          if (token) {
+            fetch('/api/auth/validate', { headers: { 'Authorization': 'Bearer ' + token } })
+              .then(function(r) { return r.json(); })
+              .then(function(d) {
+                if (d.success && d.data) {
+                  window.location.href = 'dashboard.html';
+                }
+              });
+          }
+        },
+
+        async doLogin() {
+          if (!this.loginUsername || !this.loginPassword) return;
+          this.loading = true;
+          try {
+            var res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: this.loginUsername, password: this.loginPassword })
+            });
+            var data = await res.json();
+            if (data.success && data.data) {
+              TokenManager.setToken(data.data.token);
+              TokenManager.setUserInfo(data.data.user);
+              window.location.href = 'dashboard.html';
+            } else {
+              Toast.show(data.error || '登录失败', 'error');
+            }
+          } catch(e) {
+            Toast.show('网络错误: ' + e.message, 'error');
+          }
+          this.loading = false;
+        },
+
+        async doRegister() {
+          if (!this.regUsername || !this.regPassword) return;
+          if (this.regPassword !== this.regConfirm) {
+            Toast.show('两次密码不一致', 'error');
+            return;
+          }
+          this.loading = true;
+          try {
+            var res = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: this.regUsername, password: this.regPassword, name: this.regName || this.regUsername })
+            });
+            var data = await res.json();
+            if (data.success && data.data) {
+              TokenManager.setToken(data.data.token);
+              TokenManager.setUserInfo(data.data.user);
+              window.location.href = 'dashboard.html';
+            } else {
+              Toast.show(data.error || '注册失败', 'error');
+            }
+          } catch(e) {
+            Toast.show('网络错误: ' + e.message, 'error');
+          }
+          this.loading = false;
+        }
+
+      };
+    }
+    </script>
+</body>
+</html>

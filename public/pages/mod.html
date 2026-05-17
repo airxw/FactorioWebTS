@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorioWeb - 模组管理</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <script src="/js/htmx.min.js"></script>
+    <script src="/js/alpine.min.js" defer></script>
+</head>
+<body x-data="modApp()" x-init="init()">
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <nav class="top-nav">
+                <div class="top-nav-title">模组管理</div>
+                <div class="top-nav-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" @click="ThemeManager.toggle()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    </button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click="loadMods()">刷新</button>
+                    <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
+                </div>
+            </nav>
+
+            <div class="page-content">
+                <div class="tabs mb-4">
+                    <button class="tab" :class="{ active: tab === 'installed' }" @click="tab = 'installed'">已安装模组</button>
+                    <button class="tab" :class="{ active: tab === 'browse' }" @click="tab = 'browse'">在线浏览</button>
+                </div>
+
+                <div x-show="tab === 'installed'">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h3 class="card-title mb-0">已安装模组列表</h3>
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                <div class="input-group input-group-sm" style="width: 250px;">
+                                    <span class="input-group-text"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span>
+                                    <input type="text" class="form-control" placeholder="搜索模组名称、版本、作者..." x-model="searchQuery" @input="searchQuery = $event.target.value">
+                                </div>
+                                <select class="form-select form-select-sm" style="width: auto;" x-model="filterStatus">
+                                    <option value="all">全部状态</option>
+                                    <option value="enabled">已启用</option>
+                                    <option value="disabled">已禁用</option>
+                                    <option value="has_update">有更新</option>
+                                </select>
+                                <span class="badge badge-info" x-text="'共 ' + filteredMods.length + ' / ' + mods.length + ' 个模组'"></span>
+                            </div>
+                            <div class="d-flex gap-2 mt-2">
+                                <button class="btn btn-secondary btn-sm" @click="checkConflicts()" :disabled="loading">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                    检查冲突
+                                </button>
+                                <button class="btn btn-secondary btn-sm" @click="doSync()" :disabled="loading">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                    同步文件系统
+                                </button>
+                                <button class="btn btn-primary btn-sm" @click="checkUpdates()" :disabled="loading">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    检查更新
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div x-show="loading" class="text-center p-4" style="grid-column:1/-1;">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">加载中...</span>
+                                </div>
+                                <p class="mt-2 text-muted">正在加载数据，请稍候...</p>
+                            </div>
+                            <div x-show="error && !loading" class="alert alert-danger" style="grid-column:1/-1;">
+                                <strong>错误:</strong> <span x-text="error"></span>
+                                <button class="btn btn-sm btn-outline-danger ms-2" @click="loadMods()">重试</button>
+                            </div>
+                            <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--spacing-lg);" x-show="!loading">
+                                <div x-show="filteredMods.length === 0 && mods.length > 0" class="text-center p-4" style="grid-column:1/-1;">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="text-muted mb-3"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    <p class="text-muted">未找到匹配的模组</p>
+                                    <button class="btn btn-sm btn-outline-secondary" @click="searchQuery = ''; filterStatus = 'all'">清除筛选</button>
+                                </div>
+                                <div x-show="mods.length === 0 && !error" class="text-center p-4" style="grid-column:1/-1;">暂无已安装的模组</div>
+                                <template x-for="m in filteredMods" :key="m.id">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h4 class="mb-2" x-text="m.name"></h4>
+                                            <div class="mb-2"><span class="badge badge-info" x-text="m.version"></span></div>
+                                            <p class="text-muted mb-3" x-text="m.description || '暂无描述'"></p>
+                                            <div class="mb-3">
+                                                <span class="badge" :class="m.enabled ? 'badge-success' : 'badge-warning'" x-text="m.enabled ? '已启用' : '已禁用'"></span>
+                                                <span class="badge badge-danger ml-1" x-show="m.has_update">有更新</span>
+                                            </div>
+                                            <div class="d-flex gap-2">
+                                                <button class="btn btn-sm btn-secondary" @click="toggleMod(m.id, m.enabled)" x-text="m.enabled ? '禁用' : '启用'"></button>
+                                                <button class="btn btn-sm btn-info" @click="showDeps(m.id, m.name)">依赖</button>
+                                                <button class="btn btn-sm btn-danger" @click="uninstall(m.id, m.name)">卸载</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="tab === 'browse'">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Factorio Portal 模组浏览器</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex gap-2 mb-4">
+                                <div class="input-group" style="flex: 1; max-width: 600px;">
+                                    <span class="input-group-text">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                    </span>
+                                    <input type="text"
+                                           class="form-control"
+                                           placeholder="搜索模组名称（如：bob's mods, FNEI, space exploration）..."
+                                           x-model="portalSearchQuery"
+                                           @keyup.enter="searchPortal()">
+                                    <button class="btn btn-primary" @click="searchPortal()" :disabled="portalLoading">
+                                        搜索
+                                    </button>
+                                </div>
+                                <select class="form-select" style="width: auto;" x-model="portalSort" @change="searchPortal()">
+                                    <option value="top">最热门</option>
+                                    <option value="new">最新发布</option>
+                                    <option value="updated">最近更新</option>
+                                </select>
+                            </div>
+
+                            <div x-show="portalLoading" class="text-center p-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">搜索中...</span>
+                                </div>
+                                <p class="mt-2 text-muted">正在从 Factorio Portal 获取数据...</p>
+                            </div>
+
+                            <div x-show="portalError && !portalLoading" class="alert alert-danger">
+                                <strong>搜索错误:</strong> <span x-text="portalError"></span>
+                            </div>
+
+                            <div x-show="!portalLoading && portalResults.length === 0 && !portalError" class="text-center text-muted p-5">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="mb-3 d-block mx-auto"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                <h5>开始探索模组</h5>
+                                <p>输入关键词搜索 Factorio Portal 上的数千个模组</p>
+                                <div class="mt-3">
+                                    <strong>热门搜索:</strong>
+                                    <span class="badge badge-light me-1 cursor-pointer" style="cursor:pointer;" @click="portalSearchQuery = 'bob'; searchPortal()">Bob's Mods</span>
+                                    <span class="badge badge-light me-1 cursor-pointer" style="cursor:pointer;" @click="portalSearchQuery = 'FNEI'; searchPortal()">FNEI</span>
+                                    <span class="badge badge-light me-1 cursor-pointer" style="cursor:pointer;" @click="portalSearchQuery = 'space exploration'; searchPortal()">Space Exploration</span>
+                                    <span class="badge badge-light cursor-pointer" style="cursor:pointer;" @click="portalSearchQuery = 'py'; searchPortal()">PyCoalTBaA</span>
+                                </div>
+                            </div>
+
+                            <div x-show="!portalLoading && portalResults.length > 0">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-muted">
+                                        找到 <strong x-text="portalPagination.count"></strong> 个结果
+                                        (第 <strong x-text="portalPagination.page"></strong> / <strong x-text="portalPagination.page_count"></strong> 页)
+                                    </span>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-secondary"
+                                                :disabled="portalPagination.page <= 1 || portalLoading"
+                                                @click="portalPrevPage()">
+                                            ← 上一页
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary"
+                                                :disabled="portalPagination.page >= portalPagination.page_count || portalLoading"
+                                                @click="portalNextPage()">
+                                            下一页 →
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table table-hover table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 80px;">缩略图</th>
+                                                <th>名称</th>
+                                                <th>作者</th>
+                                                <th style="width: 100px;">下载量</th>
+                                                <th style="width: 120px;">版本</th>
+                                                <th style="width: 150px;">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="mod in portalResults" :key="mod.name">
+                                                <tr>
+                                                    <td>
+                                                        <img :src="mod.thumbnail || '/img/default-mod-icon.png'"
+                                                             :alt="mod.title"
+                                                             style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;"
+                                                             onerror="this.src='/img/default-mod-icon.png'">
+                                                    </td>
+                                                    <td>
+                                                        <div class="fw-bold" x-text="mod.title || mod.name"></div>
+                                                        <small class="text-muted d-block" x-text="mod.name"></small>
+                                                        <small class="text-muted" x-text="mod.description?.substring(0, 100) + (mod.description?.length > 100 ? '...' : '')"></small>
+                                                    </td>
+                                                    <td x-text="mod.owner"></td>
+                                                    <td>
+                                                        <span x-text="formatDownloads(mod.downloads)"></span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="badge badge-info" x-text="mod.latest_release?.version || '-'"></span>
+                                                    </td>
+                                                    <td>
+                                                        <div class="d-flex gap-1 flex-column">
+                                                            <button class="btn btn-success btn-sm w-100"
+                                                                    :disabled="isInstalling(mod.name)"
+                                                                    @click="installFromPortal(mod.name)">
+                                                                <template x-if="!isInstalling(mod.name)">
+                                                                    <span>安装</span>
+                                                                </template>
+                                                                <template x-if="isInstalling(mod.name)">
+                                                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                                                    安装中...
+                                                                </template>
+                                                            </button>
+                                                            <button class="btn btn-outline-info btn-sm w-100"
+                                                                    @click="showPortalDetails(mod.name)"
+                                                                    :disabled="portalLoading">
+                                                                详情
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="d-flex justify-content-center gap-2 mt-3">
+                                    <button class="btn btn-outline-secondary"
+                                            :disabled="portalPagination.page <= 1 || portalLoading"
+                                            @click="portalPrevPage()">
+                                        ← 上一页
+                                    </button>
+                                    <span class="align-self-center">
+                                        第 <strong x-text="portalPagination.page"></strong> / <strong x-text="portalPagination.page_count"></strong> 页
+                                    </span>
+                                    <button class="btn btn-outline-secondary"
+                                            :disabled="portalPagination.page >= portalPagination.page_count || portalLoading"
+                                            @click="portalNextPage()">
+                                        下一页 →
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script>
+    function modApp() {
+      return {
+        tab: 'installed',
+        mods: [],
+        filteredMods: [],
+        loading: false,
+        error: null,
+        searchQuery: '',
+        filterStatus: 'all',
+
+        portalSearchQuery: '',
+        portalSort: 'top',
+        portalResults: [],
+        portalLoading: false,
+        portalError: null,
+        portalPagination: { page: 1, page_count: 1, count: 0 },
+        installingMods: new Set(),
+
+        init() {
+          SidebarMenu.initSidebarWithPermission();
+          var token = TokenManager.getToken();
+          var userInfo = TokenManager.getUserInfo();
+          if (!token) { window.location.href = 'login.html'; return; }
+          if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
+          this.loadMods();
+        },
+
+        get filteredMods() {
+          var query = this.searchQuery.toLowerCase().trim();
+          var status = this.filterStatus;
+          return this.mods.filter(function(m) {
+            var matchesSearch = !query ||
+              m.name.toLowerCase().indexOf(query) !== -1 ||
+              (m.display_name || m.name).toLowerCase().indexOf(query) !== -1 ||
+              m.version.toLowerCase().indexOf(query) !== -1 ||
+              (m.author || '').toLowerCase().indexOf(query) !== -1 ||
+              (m.description || '').toLowerCase().indexOf(query) !== -1;
+            var matchesStatus = status === 'all' ||
+              (status === 'enabled' && m.enabled) ||
+              (status === 'disabled' && !m.enabled) ||
+              (status === 'has_update' && m.has_update);
+            return matchesSearch && matchesStatus;
+          });
+        },
+
+        async loadMods() {
+          this.loading = true;
+          this.error = null;
+          try {
+            var res = await fetch('/api/mod/list', { headers: this.authHeaders() });
+            if (!res.ok) {
+              if (res.status === 401) { window.location.href = 'login.html'; return; }
+              throw new Error('服务器错误: ' + res.status);
+            }
+            var data = await res.json();
+            this.mods = (data.success && data.data) ? data.data : [];
+            if (!data.success) throw new Error(data.error || '加载失败');
+          } catch(e) {
+            this.error = e.message || '加载模组列表失败，请检查网络连接';
+            this.showToast(this.error, 'error');
+            console.error('[loadMods]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async toggleMod(id, currentEnabled) {
+          this.loading = true;
+          try {
+            var res = await fetch('/api/mod/toggle', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ mod_id: id, enabled: !currentEnabled })
+            });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            this.showToast(data.success ? '模组状态已切换' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadMods();
+          } catch(e) {
+            this.showToast(e.message || '网络错误，请稍后重试', 'error');
+            console.error('[toggleMod]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async uninstall(id, name) {
+          var confirmed = await window.showConfirm({ title: '卸载模组', content: '确定要卸载模组"' + name + '"吗？此操作不可撤销。', danger: true });
+          if (!confirmed) return;
+          this.loading = true;
+          try {
+            var res = await fetch('/api/mod/uninstall', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ mod_id: id })
+            });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            this.showToast(data.success ? '模组已卸载' : (data.error || '卸载失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadMods();
+          } catch(e) {
+            this.showToast(e.message || '卸载失败，请稍后重试', 'error');
+            console.error('[uninstall]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async showDeps(id, name) {
+          try {
+            var res = await fetch('/api/mod/dependencies/' + id, { headers: this.authHeaders() });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            if (data.success && data.data) {
+              var required = data.data.required || [];
+              var optional = data.data.optional || [];
+              if (required.length === 0 && optional.length === 0) {
+                window.showAlert({ title: name + '的依赖', content: '该模组无依赖' });
+                return;
+              }
+              var lines = [];
+              if (required.length > 0) {
+                lines.push('<strong>【必需依赖】</strong>');
+                required.forEach(function(d) {
+                  lines.push('  • ' + escapeHtml(d.name || '未知') + (d.installed ? ' <span class="badge badge-success">已安装</span>' : ' <span class="badge badge-danger">未安装</span>'));
+                });
+              }
+              if (optional.length > 0) {
+                lines.push('<strong>【可选依赖】</strong>');
+                optional.forEach(function(d) {
+                  lines.push('  • ' + escapeHtml(d.name || '未知') + (d.installed ? ' <span class="badge badge-success">已安装</span>' : ' <span class="badge badge-warning">未安装</span>'));
+                });
+              }
+              window.showAlert({ title: name + '的依赖', content: lines.join('<br>') });
+            } else {
+              window.showAlert({ title: name + '的依赖', content: data.error || '获取依赖信息失败' });
+            }
+          } catch(e) {
+            this.showToast(e.message || '获取依赖信息失败', 'error');
+            console.error('[showDeps]', e);
+          }
+        },
+
+        async checkConflicts() {
+          var ids = this.mods.map(function(m) { return m.id; });
+          if (ids.length === 0) { this.showToast('暂无已安装的模组', 'warning'); return; }
+          this.loading = true;
+          try {
+            var res = await fetch('/api/mod/check-conflicts', {
+              method: 'POST', headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ mod_ids: ids })
+            });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            if (!data.success) throw new Error(data.error || '检查失败');
+            var conflicts = (data.data?.conflicts) ? data.data.conflicts : [];
+            if (conflicts.length === 0) { this.showToast('✓ 未发现模组冲突', 'success'); return; }
+            var msg = conflicts.map(function(c) {
+              return '<strong>' + escapeHtml(c.mod_name || c.name || '未知模组') + '</strong>: ' + escapeHtml(c.message || c.conflict_with || '未知冲突');
+            }).join('<br>');
+            window.showAlert({ title: '⚠ 发现 ' + conflicts.length + ' 个模组冲突', content: msg, type: 'warning' });
+          } catch(e) {
+            this.showToast(e.message || '检查冲突失败', 'error');
+            console.error('[checkConflicts]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async checkUpdates() {
+          this.loading = true;
+          try {
+            var res = await fetch('/api/mod/check-updates', { headers: this.authHeaders() });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            if (data.success && data.data) {
+              var msg = '检查完成: 已检查 ' + (data.data.checked || 0) + ' 个模组';
+              if (data.data.updates > 0) {
+                msg += ', 发现 ' + data.data.updates + ' 个可用更新';
+                this.showToast(msg, 'warning');
+              } else {
+                msg += ', 所有模组已是最新版本';
+                this.showToast(msg, 'success');
+              }
+              this.loadMods();
+            } else {
+              throw new Error(data.error || '检查更新失败');
+            }
+          } catch(e) {
+            this.showToast(e.message || '检查更新失败，请稍后重试', 'error');
+            console.error('[checkUpdates]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async doSync() {
+          this.loading = true;
+          try {
+            var res = await fetch('/api/mod/sync', { method: 'POST', headers: this.authHeaders() });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            if (data.success) {
+              var msg = '同步完成';
+              if (data.data?.added > 0) msg += ': 新增 ' + data.data.added + ' 个模组';
+              if (data.data?.synced > 0) msg += ', 更新 ' + data.data.synced + ' 个模组';
+              this.showToast(msg, 'success');
+              this.loadMods();
+            } else {
+              throw new Error(data.error || '同步失败');
+            }
+          } catch(e) {
+            this.showToast(e.message || '同步文件系统失败', 'error');
+            console.error('[doSync]', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        authHeaders(ct) {
+          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
+          if (ct) h['Content-Type'] = ct;
+          return h;
+        },
+
+        showToast(msg, type) {
+          var container = document.getElementById('toast-container');
+          var toast = document.createElement('div');
+          toast.className = 'toast-item toast-' + (type || 'info');
+          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
+          container.appendChild(toast);
+          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
+          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
+        },
+
+        formatDownloads(count) {
+          if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M';
+          if (count >= 1000) return (count / 1000).toFixed(1) + 'K';
+          return count.toString();
+        },
+
+        isInstalling(modName) {
+          return this.installingMods.has(modName);
+        },
+
+        async searchPortal(page) {
+          if (!this.portalSearchQuery.trim()) {
+            this.portalError = '请输入搜索关键词';
+            return;
+          }
+
+          page = page || 1;
+          this.portalLoading = true;
+          this.portalError = null;
+          this.portalResults = [];
+
+          try {
+            var params = new URLSearchParams({
+              query: this.portalSearchQuery.trim(),
+              page: page,
+              sort: this.portalSort,
+            });
+
+            var res = await fetch('/api/mod/portal/search?' + params.toString(), {
+              headers: this.authHeaders()
+            });
+
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+
+            var data = await res.json();
+
+            if (data.success && data.data) {
+              this.portalResults = data.data.results || [];
+              this.portalPagination = {
+                page: data.data.page || 1,
+                page_count: data.data.page_count || 1,
+                count: data.data.count || 0
+              };
+            } else {
+              throw new Error(data.error || '搜索失败');
+            }
+          } catch(e) {
+            this.portalError = e.message || '搜索失败，请检查网络连接';
+            console.error('[searchPortal]', e);
+          } finally {
+            this.portalLoading = false;
+          }
+        },
+
+        async portalPrevPage() {
+          if (this.portalPagination.page > 1) {
+            await this.searchPortal(this.portalPagination.page - 1);
+          }
+        },
+
+        async portalNextPage() {
+          if (this.portalPagination.page < this.portalPagination.page_count) {
+            await this.searchPortal(this.portalPagination.page + 1);
+          }
+        },
+
+        async installFromPortal(modName) {
+          var confirmed = await window.showConfirm({
+            title: '安装模组',
+            content: '确定要从 Factorio Portal 安装模组 "' + modName + '" 吗？<br><br>这将下载并安装最新版本。'
+          });
+
+          if (!confirmed) return;
+
+          this.installingMods.add(modName);
+
+          try {
+            var res = await fetch('/api/mod/portal/install', {
+              method: 'POST',
+              headers: this.authHeaders('application/json'),
+              body: JSON.stringify({ mod_name: modName })
+            });
+
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+
+            var data = await res.json();
+
+            if (data.success) {
+              this.showToast(data.message || '安装成功', 'success');
+
+              if (this.tab === 'installed') {
+                this.loadMods();
+              }
+            } else {
+              throw new Error(data.error || '安装失败');
+            }
+          } catch(e) {
+            this.showToast(e.message || '安装失败', 'error');
+            console.error('[installFromPortal]', e);
+          } finally {
+            this.installingMods.delete(modName);
+          }
+        },
+
+        async showPortalDetails(modName) {
+          this.portalLoading = true;
+
+          try {
+            var res = await fetch('/api/mod/portal/' + encodeURIComponent(modName), {
+              headers: this.authHeaders()
+            });
+
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+
+            var data = await res.json();
+
+            if (data.success && data.data) {
+              var mod = data.data;
+              var release = mod.latest_release;
+
+              var content = '<div class="mod-details">';
+              if (mod.thumbnail) {
+                content += '<img src="' + mod.thumbnail + '" style="max-width:200px;float:right;margin-left:15px;border-radius:8px;" onerror="this.style.display=\'none\'">';
+              }
+              content += '<h4>' + escapeHtml(mod.title || mod.name) + '</h4>';
+              content += '<p><strong>名称:</strong> <code>' + escapeHtml(mod.name) + '</code></p>';
+              content += '<p><strong>作者:</strong> ' + escapeHtml(mod.owner) + '</p>';
+              content += '<p><strong>下载量:</strong> ' + this.formatDownloads(mod.downloads) + '</p>';
+
+              if (release) {
+                content += '<hr><h5>最新版本</h5>';
+                content += '<p><strong>版本:</strong> <span class="badge badge-info">' + escapeHtml(release.version) + '</span></p>';
+                content += '<p><strong>游戏版本:</strong> ' + escapeHtml(release.game_version) + '</p>';
+                content += '<p><strong>发布时间:</strong> ' + escapeHtml(release.released_at) + '</p>';
+                content += '<p><strong>文件大小:</strong> ' + (release.file_size / 1024 / 1024).toFixed(2) + ' MB</p>';
+              }
+
+              if (mod.description) {
+                content += '<hr><h5>描述</h5>';
+                content += '<p style="white-space:pre-wrap;">' + escapeHtml(mod.description.substring(0, 1000)) + (mod.description.length > 1000 ? '...' : '') + '</p>';
+              }
+
+              content += '</div>';
+
+              window.showAlert({ title: mod.title || mod.name, content: content, large: true });
+            } else if (res.status === 404) {
+              this.showToast('模组不存在: ' + modName, 'warning');
+            } else {
+              throw new Error(data.error || '获取详情失败');
+            }
+          } catch(e) {
+            this.showToast(e.message || '获取详情失败', 'error');
+            console.error('[showPortalDetails]', e);
+          } finally {
+            this.portalLoading = false;
+          }
+        }
+      };
+    }
+    </script>
+</body>
+</html>

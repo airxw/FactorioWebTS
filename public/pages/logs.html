@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日志查看器 - FactorioWeb</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <div class="main-content">
+            <div class="log-header">
+                <div class="log-header-title">
+                    <h2><i class="bi bi-journal-text"></i>日志查看器</h2>
+                    <div class="log-header-subtitle">实时监控和查看 Factorio 服务器的所有日志</div>
+                </div>
+                <div class="log-header-actions">
+                    <button class="btn btn-sm btn-outline-secondary theme-toggle-btn" id="theme-toggle" data-tooltip="切换深色/浅色模式" data-tooltip-position="bottom" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                    <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <div class="ws-status" id="ws-status">
+                        <span class="ws-dot disconnected" id="ws-dot"></span>
+                        <span id="ws-text">WebSocket 未连接</span>
+                    </div>
+
+                    <button class="header-btn active" id="btn-autoscroll" onclick="toggleAutoScroll()" title="自动滚动">
+                        <i class="bi bi-arrow-down-circle"></i>
+                        <span>自动滚动</span>
+                    </button>
+
+                    <button class="header-btn" onclick="refreshLogs()" title="刷新日志">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+
+                    <div class="dropdown" id="export-dropdown">
+                        <button class="header-btn btn-primary" onclick="toggleExportDropdown(event)" title="导出日志">
+                            <i class="bi bi-download"></i>
+                            <span>导出</span>
+                        </button>
+                        <ul class="dropdown-menu" id="export-dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="exportLogs('txt'); return false;"><i class="bi bi-filetype-txt"></i>导出为 TXT</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportLogs('json'); return false;"><i class="bi bi-filetype-json"></i>导出为 JSON</a></li>
+                        </ul>
+                    </div>
+
+                    <button class="header-btn btn-danger" onclick="showClearModal()" title="清除日志">
+                        <i class="bi bi-trash"></i>
+                        <span>清除</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="log-toolbar">
+                <div class="category-tabs">
+                    <button class="cat-tab active" data-type="all" onclick="switchCategory('all', this)">
+                        <i class="bi bi-grid-3x3-gap"></i>全部日志
+                    </button>
+                    <button class="cat-tab" data-type="chat" onclick="switchCategory('chat', this)">
+                        <i class="bi bi-chat-dots"></i>聊天记录
+                    </button>
+                    <button class="cat-tab" data-type="system" onclick="switchCategory('system', this)">
+                        <i class="bi bi-gear"></i>系统日志
+                    </button>
+                    <button class="cat-tab" data-type="event" onclick="switchCategory('event', this)">
+                        <i class="bi bi-bell"></i>事件日志
+                    </button>
+                    <button class="cat-tab" data-type="login" onclick="switchCategory('login', this)">
+                        <i class="bi bi-box-arrow-in-right"></i>登录日志
+                    </button>
+                    <button class="cat-tab" data-type="error" onclick="switchCategory('error', this)">
+                        <i class="bi bi-exclamation-triangle"></i>错误日志
+                    </button>
+                </div>
+
+                <div class="filter-row">
+                    <div class="search-box">
+                        <i class="bi bi-search"></i>
+                        <input type="text" class="search-input" id="search-input" placeholder="搜索日志内容或关键词..." oninput="debounceSearch()">
+                    </div>
+                    <label class="regex-toggle">
+                        <input type="checkbox" id="regex-mode"> 正则表达式
+                    </label>
+                    <label class="case-toggle">
+                        <input type="checkbox" id="case-sensitive"> 区分大小写
+                    </label>
+
+                    <select class="filter-select" id="level-filter" onchange="applyFilters()">
+                        <option value="">所有日志级别</option>
+                        <option value="ERROR">ERROR 及以上</option>
+                        <option value="WARN">WARN 及以上</option>
+                        <option value="INFO">INFO 及以上</option>
+                        <option value="DEBUG">DEBUG 及以上</option>
+                    </select>
+
+                    <div class="time-range-group">
+                        <button class="time-btn" data-range="1h" onclick="setTimeRange('1h', this)">1小时</button>
+                        <button class="time-btn" data-range="6h" onclick="setTimeRange('6h', this)">6小时</button>
+                        <button class="time-btn active" data-range="24h" onclick="setTimeRange('24h', this)">24小时</button>
+                        <button class="time-btn" data-range="7d" onclick="setTimeRange('7d', this)">7天</button>
+                        <button class="time-btn" data-range="all" onclick="setTimeRange('all', this)">全部</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-terminal-wrapper">
+                <div class="log-terminal" id="log-terminal">
+                    <div class="log-content" id="log-content">
+                        <div class="loading-state">
+                            <div class="spinner-border" role="status"></div>
+                            <p>正在加载日志，请稍候...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="scroll-to-latest" id="scroll-to-latest" onclick="scrollToBottom()" title="滚动到最新">
+                    <i class="bi bi-arrow-down-circle"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="clear-modal-overlay" id="clear-modal-overlay" onclick="hideClearModal(event)">
+        <div class="clear-modal" onclick="event.stopPropagation()">
+            <div class="clear-modal-header">
+                <h5><i class="bi bi-trash"></i>清除日志</h5>
+                <button class="clear-modal-close" onclick="hideClearModal()"><i class="bi bi-x"></i></button>
+            </div>
+            <div class="clear-modal-body">
+                <div class="clear-section">
+                    <h6>清除方式</h6>
+                    <div class="clear-option selected" onclick="selectClearOption(this, 'time')">
+                        <input type="radio" name="clear-type" value="time" checked>
+                        <label>按时间清除：删除 N 天前的所有日志</label>
+                    </div>
+                    <div class="clear-input-row" id="time-clear-options">
+                        <input type="number" id="clear-days" value="30" min="1" max="365" onchange="updateClearPreview()">
+                        <span style="color: var(--gray-color); font-size: 0.85rem;">天</span>
+                        <input type="range" id="clear-days-slider" value="30" min="1" max="365" oninput="syncSlider(this)">
+                    </div>
+
+                    <div class="clear-option" style="margin-top: 10px;" onclick="selectClearOption(this, 'count')">
+                        <input type="radio" name="clear-type" value="count">
+                        <label>按数量保留：只保留最新的 N 条日志</label>
+                    </div>
+                    <div class="clear-input-row" id="count-clear-options" style="display: none;">
+                        <input type="number" id="clear-count" value="10000" min="100" max="1000000" step="100" onchange="updateClearPreview()">
+                        <span style="color: var(--gray-color); font-size: 0.85rem;">条</span>
+                    </div>
+                </div>
+
+                <div class="clear-section">
+                    <h6>选择要清除的日志类别</h6>
+                    <div class="clear-categories">
+                        <label class="cat-checkbox"><input type="checkbox" value="chat" checked> 聊天记录</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="system" checked> 系统日志</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="event" checked> 事件日志</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="login" checked> 登录日志</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="error" checked> 错误日志</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="save" checked> 存档日志</label>
+                    </div>
+                </div>
+
+                <div class="clear-preview">
+                    预计将清除 <strong id="clear-estimate">0</strong> 条日志
+                </div>
+            </div>
+            <div class="clear-modal-footer">
+                <button class="header-btn" onclick="hideClearModal()">取消</button>
+                <button class="header-btn btn-danger" onclick="confirmClearLogs()">
+                    <i class="bi bi-trash"></i>确认清除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/js/token-manager.js"></script>
+    <script src="/js/shared.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/tooltip.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/app.js"></script>
+
+    <script>
+        let currentLogs = [];
+        let filteredLogs = [];
+        let currentCategory = 'all';
+        let currentTimeRange = '24h';
+        let autoScrollEnabled = true;
+        let userScrolledUp = false;
+        let searchTimer = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSession({
+                requireAuth: true,
+                onValid: function(userData) {
+                    if (userData.role !== 'admin') {
+                        showToast('权限不足，只有管理员才能访问此页面', 'error');
+                        setTimeout(function() {
+                            window.location.href = 'profile.html';
+                        }, 1500);
+                        return;
+                    }
+                    SidebarMenu.initSidebarWithPermission();
+                    loadLogs();
+                    setupScrollDetection();
+                    connectWebSocket();
+                }
+            });
+        });
+
+        async function loadLogs() {
+            const logContent = document.getElementById('log-content');
+            logContent.innerHTML = '<div class="loading-state"><div class="spinner-border" role="status"></div><p>正在加载日志，请稍候...</p></div>';
+
+            try {
+                const baseParams = new URLSearchParams();
+                baseParams.set('page_size', '2000');
+
+                if (currentCategory !== 'all') {
+                    baseParams.set('type', currentCategory);
+                }
+
+                const levelFilter = document.getElementById('level-filter').value;
+                if (levelFilter) {
+                    baseParams.set('level', levelFilter);
+                }
+
+                if (currentTimeRange !== 'all') {
+                    const now = new Date();
+                    baseParams.set('end_date', now.toISOString());
+                    const rangeMap = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 };
+                    baseParams.set('start_date', new Date(now.getTime() - rangeMap[currentTimeRange]).toISOString());
+                }
+
+                const response = await fetchAPI('/api/logs?' + baseParams.toString());
+                const data = await response.json();
+
+                if (data.success && data.data) {
+                    var firstPageLogs = Array.isArray(data.data) ? data.data : (data.data.logs || []);
+                    var total = data.data.total || firstPageLogs.length;
+                    var pageSize = data.data.page_size || 2000;
+
+                    currentLogs = firstPageLogs;
+
+                    if (total > firstPageLogs.length && data.data.page !== undefined) {
+                        var totalPages = Math.ceil(total / pageSize);
+                        var promises = [];
+                        for (var p = 2; p <= totalPages; p++) {
+                            var pageParams = new URLSearchParams(baseParams);
+                            pageParams.set('page', String(p));
+                            promises.push(
+                                fetchAPI('/api/logs?' + pageParams.toString())
+                                    .then(function(r) { return r.json(); })
+                                    .then(function(d) {
+                                        if (d.success && d.data) {
+                                            return Array.isArray(d.data) ? d.data : (d.data.logs || []);
+                                        }
+                                        return [];
+                                    })
+                                    .catch(function() { return []; })
+                            );
+                        }
+                        var extraPages = await Promise.all(promises);
+                        extraPages.forEach(function(pageLogs) {
+                            currentLogs = currentLogs.concat(pageLogs);
+                        });
+                    }
+
+                    applyFilters();
+                    showToast('成功加载 ' + currentLogs.length + ' 条日志', 'success');
+                } else {
+                    logContent.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无日志数据</p></div>';
+                    currentLogs = [];
+                    filteredLogs = [];
+                }
+            } catch (err) {
+                console.error('加载日志失败', err);
+                logContent.innerHTML = '<div class="empty-state"><i class="bi bi-exclamation-circle"></i><p style="color:#e74c3c;">加载日志失败: ' + escapeHtml(err.message) + '</p></div>';
+                showToast('加载日志失败: ' + err.message, 'error');
+            }
+        }
+
+        function refreshLogs() {
+            loadLogs();
+        }
+
+        function connectWebSocket() {
+            wsClient.on('open', function() {
+                updateWsStatus('connected', '已连接');
+                showToast('实时日志连接成功', 'success');
+            });
+
+            wsClient.subscribe('log', function(entry) {
+                if (entry) {
+                    appendLogEntry(entry);
+                }
+            });
+
+            wsClient.on('close', function() {
+                updateWsStatus('disconnected', '连接已断开');
+            });
+
+            wsClient.on('error', function(error) {
+                updateWsStatus('disconnected', '连接错误');
+            });
+
+            updateWsStatus('reconnecting', '正在重连...');
+            wsClient.connect();
+        }
+
+        function updateWsStatus(state, text) {
+            const dot = document.getElementById('ws-dot');
+            const txt = document.getElementById('ws-text');
+            if (dot && txt) {
+                dot.className = 'ws-dot ' + state;
+                txt.textContent = text;
+            }
+        }
+
+        function appendLogEntry(entry) {
+            if (!entry) return;
+
+            entry.type = entry.type || entry.category || 'system';
+            entry.time = entry.time || entry.timestamp || new Date().toLocaleString('zh-CN');
+            entry.level = entry.level || 'INFO';
+            entry.message = entry.message || entry.msg || entry.content || '';
+
+            currentLogs.push(entry);
+
+            if (shouldShowEntry(entry)) {
+                const logContent = document.getElementById('log-content');
+                const el = createLogElement(entry, true);
+                logContent.appendChild(el);
+
+                if (autoScrollEnabled && !userScrolledUp) {
+                    scrollToBottomImmediate();
+                }
+            }
+        }
+
+        function shouldShowEntry(entry) {
+            if (currentCategory !== 'all' && entry.type !== currentCategory) return false;
+            const levelOrder = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+            const minLevel = document.getElementById('level-filter').value;
+            if (minLevel && (levelOrder[entry.level] || 0) < (levelOrder[minLevel] || 0)) return false;
+            return true;
+        }
+
+        function createLogElement(entry, isNew = false) {
+            const div = document.createElement('div');
+            div.className = 'log-entry ' + (entry.type || 'info') + (isNew ? ' new-entry' : '');
+            div.dataset.type = entry.type || 'info';
+
+            let message = escapeHtml(entry.message || '');
+
+            const searchVal = document.getElementById('search-input').value.trim();
+            if (searchVal) {
+                message = highlightText(message, searchVal);
+            }
+
+            div.innerHTML =
+                '<span class="log-time">' + escapeHtml(entry.time || '') + '</span>' +
+                '<span class="log-level ' + (entry.level || 'INFO') + '">' + (entry.level || 'INFO') + '</span>' +
+                '<span class="log-msg">' + message + '</span>';
+
+            return div;
+        }
+
+        function renderLogList() {
+            const logContent = document.getElementById('log-content');
+
+            if (filteredLogs.length === 0) {
+                logContent.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无符合条件的日志</p></div>';
+                return;
+            }
+
+            logContent.innerHTML = '';
+            filteredLogs.forEach(function(entry) {
+                logContent.appendChild(createLogElement(entry));
+            });
+
+            if (autoScrollEnabled && !userScrolledUp) {
+                scrollToBottomImmediate();
+            }
+        }
+
+        function switchCategory(type, btn) {
+            currentCategory = type;
+            document.querySelectorAll('.cat-tab').forEach(function(t) { t.classList.remove('active'); });
+            btn.classList.add('active');
+            applyFilters();
+        }
+
+        function setTimeRange(range, btn) {
+            currentTimeRange = range;
+            document.querySelectorAll('.time-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            loadLogs();
+        }
+
+        function applyFilters() {
+            let result = [...currentLogs];
+
+            if (currentCategory !== 'all') {
+                result = result.filter(function(e) { return e.type === currentCategory; });
+            }
+
+            const levelVal = document.getElementById('level-filter').value;
+            if (levelVal) {
+                const order = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+                const minLv = order[levelVal] || 0;
+                result = result.filter(function(e) { return (order[e.level] || 0) >= minLv; });
+            }
+
+            const searchVal = document.getElementById('search-input').value.trim();
+            if (searchVal) {
+                const isRegex = document.getElementById('regex-mode').checked;
+                const isCaseSensitive = document.getElementById('case-sensitive').checked;
+                result = result.filter(function(e) {
+                    const text = (e.message || '') + ' ' + (e.time || '');
+                    const target = isCaseSensitive ? text : text.toLowerCase();
+                    const query = isCaseSensitive ? searchVal : searchVal.toLowerCase();
+
+                    if (isRegex) {
+                        try {
+                            const flags = isCaseSensitive ? 'g' : 'gi';
+                            return new RegExp(searchVal, flags).test(text);
+                        } catch (err) {
+                            return false;
+                        }
+                    }
+                    return target.includes(query);
+                });
+            }
+
+            filteredLogs = result;
+            renderLogList();
+        }
+
+        function debounceSearch() {
+            if (searchTimer) clearTimeout(searchTimer);
+            searchTimer = setTimeout(applyFilters, 300);
+        }
+
+        function highlightText(text, keyword) {
+            const isRegex = document.getElementById('regex-mode').checked;
+            const isCaseSensitive = document.getElementById('case-sensitive').checked;
+
+            try {
+                let flags = 'g';
+                if (!isCaseSensitive) flags += 'i';
+                const regex = isRegex ? new RegExp(keyword, flags) : new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+                return text.replace(regex, '<mark>$&</mark>');
+            } catch (e) {
+                return text;
+            }
+        }
+
+        function toggleAutoScroll() {
+            autoScrollEnabled = !autoScrollEnabled;
+            const btn = document.getElementById('btn-autoscroll');
+            if (autoScrollEnabled) {
+                btn.classList.add('active');
+                btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i><span>自动滚动</span>';
+                scrollToBottomImmediate();
+                userScrolledUp = false;
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = '<i class="bi bi-pause-circle"></i><span>暂停滚动</span>';
+            }
+        }
+
+        function setupScrollDetection() {
+            const terminal = document.getElementById('log-terminal');
+            const scrollBtn = document.getElementById('scroll-to-latest');
+
+            terminal.addEventListener('scroll', function() {
+                const threshold = 150;
+                const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < threshold;
+
+                if (!atBottom) {
+                    userScrolledUp = true;
+                    scrollBtn.classList.add('show');
+                } else {
+                    userScrolledUp = false;
+                    scrollBtn.classList.remove('show');
+                }
+            });
+        }
+
+        function scrollToBottom() {
+            const terminal = document.getElementById('log-terminal');
+            terminal.scrollTo({ top: terminal.scrollHeight, behavior: 'smooth' });
+        }
+
+        function scrollToBottomImmediate() {
+            const terminal = document.getElementById('log-terminal');
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function showClearModal() {
+            document.getElementById('clear-modal-overlay').classList.add('show');
+            updateClearPreview();
+        }
+
+        function hideClearModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('clear-modal-overlay').classList.remove('show');
+        }
+
+        function selectClearOption(el, type) {
+            document.querySelectorAll('.clear-option').forEach(function(o) { o.classList.remove('selected'); });
+            el.classList.add('selected');
+            document.querySelector('input[name="clear-type"][value="' + type + '"]').checked = true;
+
+            document.getElementById('time-clear-options').style.display = type === 'time' ? 'flex' : 'none';
+            document.getElementById('count-clear-options').style.display = type === 'count' ? 'flex' : 'none';
+            updateClearPreview();
+        }
+
+        function syncSlider(slider) {
+            document.getElementById('clear-days').value = slider.value;
+            updateClearPreview();
+        }
+
+        function updateClearPreview() {
+            const type = document.querySelector('input[name="clear-type"]:checked').value;
+            let estimate = 0;
+
+            if (type === 'time') {
+                const days = parseInt(document.getElementById('clear-days').value) || 30;
+                const cutoff = Date.now() - days * 86400000;
+                estimate = currentLogs.filter(function(e) {
+                    const t = new Date(e.time || 0).getTime();
+                    return t > 0 && t < cutoff;
+                }).length;
+            } else {
+                const count = parseInt(document.getElementById('clear-count').value) || 10000;
+                estimate = Math.max(0, currentLogs.length - count);
+            }
+
+            document.getElementById('clear-estimate').textContent = estimate.toLocaleString();
+        }
+
+        async function confirmClearLogs() {
+            const type = document.querySelector('input[name="clear-type"]:checked').value;
+            const categories = [];
+            document.querySelectorAll('.clear-categories input:checked').forEach(function(cb) {
+                categories.push(cb.value);
+            });
+
+            if (categories.length === 0) {
+                showToast('请至少选择一个日志类别', 'warning');
+                return;
+            }
+
+            const value = type === 'time'
+                ? (parseInt(document.getElementById('clear-days').value) || 30)
+                : (parseInt(document.getElementById('clear-count').value) || 10000);
+
+            showModal({title:'确认清除日志',content:'确定要清除 '+document.getElementById('clear-estimate').textContent+' 条日志吗？此操作不可撤销！',confirmText:'清除',danger:true,onConfirm:function(){
+                (async function(){
+                    try {
+                        const response = await fetchAPI('/api/logs/clear', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                type: type,
+                                value: value,
+                                categories: categories
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            showToast('日志清除成功', 'success');
+                            hideClearModal();
+                            loadLogs();
+                        } else {
+                            showToast(data.error || '清除日志失败', 'error');
+                        }
+                    } catch (err) {
+                        showToast('清除日志出错: ' + err.message, 'error');
+                    }
+                })();
+            }});
+        }
+
+        function exportLogs(format) {
+            const logsToExport = filteredLogs.length > 0 ? filteredLogs : currentLogs;
+
+            if (logsToExport.length === 0) {
+                showToast('没有可导出的日志', 'warning');
+                return;
+            }
+
+            let content, filename, mimeType;
+
+            if (format === 'txt') {
+                content = logsToExport.map(function(log) {
+                    return '[' + (log.time || '') + '] [' + (log.level || 'INFO') + '] ' + (log.message || '');
+                }).join('\n');
+                filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+                mimeType = 'text/plain';
+            } else if (format === 'json') {
+                content = JSON.stringify(logsToExport, null, 2);
+                filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.json';
+                mimeType = 'application/json';
+            }
+
+            downloadFile(content, filename, mimeType);
+            showToast('日志已导出 (' + format.toUpperCase() + ')', 'success');
+        }
+
+        function toggleExportDropdown(event) {
+            event.stopPropagation();
+            const menu = document.getElementById('export-dropdown-menu');
+            menu.classList.toggle('show');
+        }
+
+        document.addEventListener('click', function() {
+            const menu = document.getElementById('export-dropdown-menu');
+            if (menu) {
+                menu.classList.remove('show');
+            }
+        });
+
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
