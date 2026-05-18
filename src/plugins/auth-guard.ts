@@ -24,6 +24,7 @@ export async function authenticate(
     request.currentUser = verifyToken(token);
   } catch {
     reply.status(401).send({ success: false, error: '令牌无效或已过期' });
+    return;
   }
 }
 
@@ -33,6 +34,7 @@ export async function requireAdmin(
 ): Promise<void> {
   if (request.currentUser.role !== 'admin') {
     reply.status(403).send({ success: false, error: '权限不足，需要管理员角色' });
+    return;
   }
 }
 

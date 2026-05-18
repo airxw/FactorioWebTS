@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import * as service from './player.service.js';
-import { verifyToken } from '../../plugins/jwt.js';
-import type { JwtPayload } from '../../plugins/jwt.js';
+import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import {
   kickPlayerSchema,
   banPlayerSchema,
@@ -10,33 +9,8 @@ import {
   setWhitelistSchema,
 } from './player.schema.js';
 
-function authenticate(request: FastifyRequest, reply: FastifyReply): JwtPayload | null {
-  const header = request.headers.authorization;
-  if (!header) {
-    reply.status(401).send({ success: false, error: '缺少认证令牌' });
-    return null;
-  }
-  try {
-    return verifyToken(header.replace(/^Bearer\s+/i, ''));
-  } catch {
-    reply.status(401).send({ success: false, error: '令牌无效或已过期' });
-    return null;
-  }
-}
-
-function requireAdmin(payload: JwtPayload, reply: FastifyReply): boolean {
-  if (payload.role !== 'admin') {
-    reply.status(403).send({ success: false, error: '权限不足' });
-    return false;
-  }
-  return true;
-}
-
 export default async function playerRoutes(app: FastifyInstance) {
-  app.get('/api/players/online', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.get('/api/players/online', { preHandler: [authenticate] }, async (request, reply) => {
     try {
       const players = await service.getOnlinePlayers();
       return reply.send({ success: true, data: { players, count: players.length } });
@@ -46,10 +20,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/players/admins', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.get('/api/players/admins', { preHandler: [authenticate] }, async (request, reply) => {
     try {
       const admins = await service.getAdmins();
       return reply.send({ success: true, data: admins });
@@ -59,11 +30,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/players/bans', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.get('/api/players/bans', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     try {
       const bans = await service.getBans();
       return reply.send({ success: true, data: bans });
@@ -73,11 +40,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/players/whitelist', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.get('/api/players/whitelist', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     try {
       const list = await service.getWhitelist();
       return reply.send({ success: true, data: list });
@@ -87,11 +50,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/kick', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/kick', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = kickPlayerSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -106,11 +65,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/ban', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/ban', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = banPlayerSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -125,11 +80,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/unban', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/unban', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = unbanPlayerSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -144,11 +95,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/set-admin', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/set-admin', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = setAdminSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -163,11 +110,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/set-whitelist', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/set-whitelist', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = setWhitelistSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -182,11 +125,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/whisper', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/whisper', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { player, message } = (request.body as { player?: string; message?: string }) || {};
     if (!player || !message) {
       return reply.status(400).send({ success: false, error: 'player 和 message 不能为空' });
@@ -201,11 +140,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/say', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/say', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { message } = (request.body as { message?: string }) || {};
     if (!message) {
       return reply.status(400).send({ success: false, error: 'message 不能为空' });
@@ -220,11 +155,7 @@ export default async function playerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/players/give', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/players/give', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { player, item, count } = (request.body as { player?: string; item?: string; count?: number }) || {};
     if (!player || !item) {
       return reply.status(400).send({ success: false, error: 'player 和 item 不能为空' });

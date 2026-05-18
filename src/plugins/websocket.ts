@@ -39,15 +39,14 @@ export class WsManager {
     client.subscriptions = new Set(channels);
   }
 
-  broadcast(channel: string, data: unknown): number {
+  broadcast(channel: string, data: unknown, requireAuth = false): number {
     let sent = 0;
     const payload = JSON.stringify({ channel, data, timestamp: Date.now() });
 
     for (const [, client] of this.clients) {
-      if (
-        client.socket.readyState === WS_OPEN &&
-        client.subscriptions.has(channel)
-      ) {
+      if (client.socket.readyState !== WS_OPEN) continue;
+      if (requireAuth && !client.user) continue;
+      if (client.subscriptions.has(channel)) {
         client.socket.send(payload);
         sent++;
       }

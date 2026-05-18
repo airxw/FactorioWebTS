@@ -6,6 +6,10 @@
 })();
 
 var versionListData = [];
+var serverState = 'unknown';
+var stateReceived = false;
+var isOperating = false;
+var STATE_DISABLE_ALL = ['unknown', 'starting', 'stopping'];
 
 document.addEventListener('DOMContentLoaded', function() {
     checkUserRole();
@@ -16,6 +20,10 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSystemStats();
     });
 
+    wsClient.on('server_state', function(data) {
+        onServerStateMessage(data);
+    });
+
     wsClient.connect();
 
     updateServerStatus();
@@ -23,10 +31,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     wsClient.on('log', function(data) {
         addLogItem(data);
-    });
-
-    wsClient.on('server_status', function(data) {
-        updateStatusDisplay(data.running, data.version);
     });
 
     wsClient.on('open', function() {
@@ -40,6 +44,47 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(updateServerStatus, 5000);
     setInterval(loadSystemStats, 10000);
 });
+
+function onServerStateMessage(data) {
+    if (!data || !data.state) return;
+    stateReceived = true;
+    serverState = data.state;
+    updateButtonStates();
+}
+
+function updateButtonStates() {
+    var startBtn = document.getElementById('start-btn');
+    var stopBtn = document.getElementById('stop-btn');
+    var saveBtn = document.getElementById('save-btn');
+
+    if (!stateReceived) {
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+        return;
+    }
+
+    if (isOperating) {
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+        return;
+    }
+
+    if (STATE_DISABLE_ALL.indexOf(serverState) >= 0) {
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+    } else if (serverState === 'off' || serverState === 'error') {
+        if (startBtn) startBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+    } else if (serverState === 'running') {
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
+    }
+}
 
 function checkUserRole() {
     try {
@@ -88,9 +133,6 @@ function updateServerStatus() {
 function updateStatusDisplay(running, version) {
     var statusElement = document.getElementById('server-status');
     var versionElement = document.getElementById('server-version');
-    var startBtn = document.getElementById('start-btn');
-    var stopBtn = document.getElementById('stop-btn');
-    var saveBtn = document.getElementById('save-btn');
 
     statusElement.textContent = running ? '运行中' : '已停止';
     statusElement.className = 'status-indicator ' + (running ? 'status-online' : 'status-offline');
@@ -99,9 +141,7 @@ function updateStatusDisplay(running, version) {
         versionElement.textContent = '版本: ' + version;
     }
 
-    startBtn.disabled = !!running;
-    stopBtn.disabled = !running;
-    saveBtn.disabled = !running;
+    updateButtonStates();
 }
 
 function loadServerVersion() {
@@ -121,41 +161,69 @@ function loadServerVersion() {
 }
 
 function startServer() {
+    if (!stateReceived) {
+        showToast('服务端状态未就绪，无法启动', 'error');
+        return;
+    }
+    if (serverState !== 'off' && serverState !== 'error') {
+        showToast('当前状态不允许启动', 'error');
+        return;
+    }
+    isOperating = true;
+    updateButtonStates();
     fetchAPI('/api/server/start', { method: 'POST' }).then(function(res) { return res.json(); })
         .then(function(response) {
             ApiResponse.handleResponse(response,
                 function() {
-                    showToast('服务端启动成功', 'success');
+                    showToast('启动命令已发送', 'success');
                     updateServerStatus();
                 },
                 function(error) {
-                    showToast('服务端启动失败: ' + error, 'error');
+                    showToast('启动失败: ' + error, 'error');
+                    isOperating = false;
+                    updateButtonStates();
                 }
             );
         })
         .catch(function(err) {
-            showToast('服务端启动请求失败', 'error');
+            showToast('启动请求失败', 'error');
             console.error('启动服务端失败:', err);
+            isOperating = false;
+            updateButtonStates();
         });
 }
 
 function stopServer() {
+    if (!stateReceived) {
+        showToast('服务端状态未就绪，无法停止', 'error');
+        return;
+    }
+    if (serverState !== 'running') {
+        showToast('当前状态不允许停止', 'error');
+        return;
+    }
     showModal({title:'确认停止',content:'确定要停止服务端吗？',confirmText:'停止',danger:true,onConfirm:function(){
+        isOperating = true;
+        updateButtonStates();
         fetchAPI('/api/server/stop', { method: 'POST' }).then(function(res) { return res.json(); })
             .then(function(response) {
                 ApiResponse.handleResponse(response,
                     function() {
-                        showToast('服务端停止成功', 'success');
+                        showToast('服务端已停止', 'success');
                         updateServerStatus();
                     },
                     function(error) {
-                        showToast('服务端停止失败: ' + error, 'error');
+                        showToast('停止失败: ' + error, 'error');
+                        isOperating = false;
+                        updateButtonStates();
                     }
                 );
             })
             .catch(function(err) {
-                showToast('服务端停止请求失败', 'error');
+                showToast('停止请求失败', 'error');
                 console.error('停止服务端失败:', err);
+                isOperating = false;
+                updateButtonStates();
             });
     }});
 }
@@ -325,18 +393,15 @@ function refreshServerStatus() {
                 function(data) {
                     var running = data.running;
                     var version = data.version;
+                    serverState = data.state || 'unknown';
+                    stateReceived = true;
+                    updateButtonStates();
                     statusElement.textContent = running ? '运行中' : '已停止';
                     statusElement.className = 'status-indicator ' + (running ? 'status-online' : 'status-offline');
                     var versionElement = document.getElementById('server-version');
                     if (versionElement && version) {
                         versionElement.textContent = '版本: ' + version;
                     }
-                    var startBtn = document.getElementById('start-btn');
-                    var stopBtn = document.getElementById('stop-btn');
-                    var saveBtn = document.getElementById('save-btn');
-                    if (startBtn) startBtn.disabled = !!running;
-                    if (stopBtn) stopBtn.disabled = !running;
-                    if (saveBtn) saveBtn.disabled = !running;
                 },
                 function() {
                     statusElement.textContent = '获取失败';

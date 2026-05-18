@@ -1,33 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { verifyToken } from '../../plugins/jwt.js';
-import type { JwtPayload } from '../../plugins/jwt.js';
+import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import * as service from './log.service.js';
 import { createReadStream } from 'node:fs';
 
-async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<JwtPayload> {
-  const authHeader = request.headers.authorization;
-  if (!authHeader) { reply.status(401).send({ success: false, error: '缺少认证令牌' }); throw new Error(); }
-  try { return verifyToken(authHeader.replace(/^Bearer\s+/i, '')); }
-  catch { reply.status(401).send({ success: false, error: '令牌无效或已过期' }); throw new Error(); }
-}
-
-function requireAdmin(payload: JwtPayload, reply: FastifyReply): void {
-  if (payload.role !== 'admin') { reply.status(403).send({ success: false, error: '权限不足，需要管理员角色' }); throw new Error(); }
-}
-
 export default async function logRoutes(app: FastifyInstance) {
-  app.get('/api/logs/tail', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.get('/api/logs/tail', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { lines } = request.query as { lines?: string };
     const count = Math.min(parseInt(lines || '100', 10), 1000);
     const result = service.tailLog(count);
     return reply.send({ success: true, data: result });
   });
 
-  app.get('/api/logs', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.get('/api/logs', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { page, page_size, level, search, start_date, end_date, type } = request.query as Record<string, string>;
     const result = service.getLogHistory({
       page: page ? parseInt(page, 10) : undefined,
@@ -41,15 +25,11 @@ export default async function logRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: result });
   });
 
-  app.get('/api/logs/files', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.get('/api/logs/files', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     return reply.send({ success: true, data: service.listLogFiles() });
   });
 
-  app.get('/api/logs/download/:filename', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.get('/api/logs/download/:filename', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { filename } = request.params as { filename: string };
     try {
       const filePath = service.getLogDownloadPath(filename);
@@ -62,9 +42,7 @@ export default async function logRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete('/api/logs/:filename', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.delete('/api/logs/:filename', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { filename } = request.params as { filename: string };
     try {
       service.deleteLogFile(filename);
@@ -75,9 +53,7 @@ export default async function logRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/logs/clear', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/logs/clear', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const body = request.body as { type: string; value: number; categories: string[] };
     try {
       const result = service.clearLogs({

@@ -1,30 +1,15 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { verifyToken } from '../../plugins/jwt.js';
-import type { JwtPayload } from '../../plugins/jwt.js';
+import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import * as service from './file.service.js';
 import { createSaveSchema } from './file.schema.js';
 import { createReadStream } from 'node:fs';
 
-async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<JwtPayload> {
-  const authHeader = request.headers.authorization;
-  if (!authHeader) { reply.status(401).send({ success: false, error: '缺少认证令牌' }); throw new Error(); }
-  try { return verifyToken(authHeader.replace(/^Bearer\s+/i, '')); }
-  catch { reply.status(401).send({ success: false, error: '令牌无效或已过期' }); throw new Error(); }
-}
-
-function requireAdmin(payload: JwtPayload, reply: FastifyReply): void {
-  if (payload.role !== 'admin') { reply.status(403).send({ success: false, error: '权限不足，需要管理员角色' }); throw new Error(); }
-}
-
 export default async function fileRoutes(app: FastifyInstance) {
-  app.get('/api/files/saves', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/files/saves', { preHandler: [authenticate] }, async (request, reply) => {
     return reply.send({ success: true, data: service.listSaves() });
   });
 
-  app.post('/api/files/upload', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/files/upload', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { filename, content } = (request.body || {}) as { filename?: string; content?: string };
     if (!filename || !content) return reply.status(400).send({ success: false, error: 'filename 和 content 是必填项' });
     try {
@@ -37,8 +22,7 @@ export default async function fileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/files/download/:filename', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/files/download/:filename', { preHandler: [authenticate] }, async (request, reply) => {
     const { filename } = request.params as { filename: string };
     try {
       const filePath = service.getSaveDownloadPath(filename);
@@ -51,9 +35,7 @@ export default async function fileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete('/api/files/:filename', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.delete('/api/files/:filename', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { filename } = request.params as { filename: string };
     try {
       service.deleteSave(filename);
@@ -64,9 +46,7 @@ export default async function fileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/files/set-current', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/files/set-current', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { filename } = (request.body || {}) as { filename?: string };
     if (!filename) return reply.status(400).send({ success: false, error: 'filename 是必填项' });
     try {
@@ -78,9 +58,7 @@ export default async function fileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/files/create-save', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/files/create-save', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = createSaveSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     try {

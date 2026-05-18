@@ -19,5 +19,5 @@ services:
       - RCON_PASSWORD=${RCON_PASSWORD:-}
       - DB_PATH=./data/factorio.db
       - LOG_LEVEL=info
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8000}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3001}
     restart: unless-stopped

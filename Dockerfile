@@ -15,6 +15,8 @@ RUN addgroup -S factorio && adduser -S factorio -G factorio
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src/ ./src/
+COPY public/ ./public/
+COPY config/ ./config/
 
 RUN npm install -g typescript tsx && npx tsc
 

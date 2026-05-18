@@ -1,13 +1,12 @@
-import { getRconPool } from '../../lib/rcon.js';
+import { sendGameCommand } from '../../lib/game-command-bus.js';
 
 export async function getOnlinePlayers(): Promise<string[]> {
-  const pool = getRconPool();
-  const response = await pool.execute('/players');
+  const result = await sendGameCommand('/players');
 
-  if (!response) return [];
+  if (!result.ok) return [];
 
   const players: string[] = [];
-  const lines = response.split('\n');
+  const lines = result.value.split('\n');
   for (const line of lines) {
     const match = line.match(/^(\S+)\s+\(online\)/i);
     if (match) {
@@ -22,109 +21,102 @@ export async function kickPlayer(
   player: string,
   reason = ''
 ): Promise<string> {
-  const pool = getRconPool();
   const cmd = reason ? `/kick ${player} ${reason}` : `/kick ${player}`;
-  return pool.execute(cmd);
+  const result = await sendGameCommand(cmd);
+  return result.ok ? result.value : '';
 }
 
 export async function banPlayer(
   player: string,
   reason = ''
 ): Promise<string> {
-  const pool = getRconPool();
   const cmd = reason ? `/ban ${player} ${reason}` : `/ban ${player}`;
-  return pool.execute(cmd);
+  const result = await sendGameCommand(cmd);
+  return result.ok ? result.value : '';
 }
 
 export async function unbanPlayer(player: string): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute(`/unban ${player}`);
+  const result = await sendGameCommand(`/unban ${player}`);
+  return result.ok ? result.value : '';
 }
 
 export async function setAdmin(
   player: string,
   admin: boolean
 ): Promise<string> {
-  const pool = getRconPool();
-  if (admin) {
-    return pool.execute(`/promote ${player}`);
-  }
-  return pool.execute(`/demote ${player}`);
+  const cmd = admin ? `/promote ${player}` : `/demote ${player}`;
+  const result = await sendGameCommand(cmd);
+  return result.ok ? result.value : '';
 }
 
 export async function setWhitelist(
   player: string,
   whitelist: boolean
 ): Promise<string> {
-  const pool = getRconPool();
-  if (whitelist) {
-    return pool.execute(`/whitelist add ${player}`);
-  }
-  return pool.execute(`/whitelist remove ${player}`);
+  const cmd = whitelist ? `/whitelist add ${player}` : `/whitelist remove ${player}`;
+  const result = await sendGameCommand(cmd);
+  return result.ok ? result.value : '';
 }
 
 export async function getWhitelist(): Promise<string[]> {
-  const pool = getRconPool();
-  const response = await pool.execute('/whitelist get');
+  const result = await sendGameCommand('/whitelist get');
 
-  if (!response) return [];
+  if (!result.ok) return [];
 
-  return response
+  return result.value
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 }
 
 export async function getAdmins(): Promise<string[]> {
-  const pool = getRconPool();
-  const response = await pool.execute('/admins');
+  const result = await sendGameCommand('/admins');
 
-  if (!response) return [];
+  if (!result.ok) return [];
 
-  return response
+  return result.value
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('Admins:'));
 }
 
 export async function getBans(): Promise<string[]> {
-  const pool = getRconPool();
-  const response = await pool.execute('/bans');
+  const result = await sendGameCommand('/bans');
 
-  if (!response) return [];
+  if (!result.ok) return [];
 
-  return response
+  return result.value
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 }
 
 export async function serverSave(): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute('/server-save');
+  const result = await sendGameCommand('/server-save');
+  return result.ok ? result.value : '';
 }
 
 export async function serverQuit(): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute('/quit');
+  const result = await sendGameCommand('/quit');
+  return result.ok ? result.value : '';
 }
 
 export async function sendCommand(command: string): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute(command);
+  const result = await sendGameCommand(command);
+  return result.ok ? result.value : '';
 }
 
 export async function sayMessage(message: string): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute(`/say ${message}`);
+  const result = await sendGameCommand(`/say ${message}`);
+  return result.ok ? result.value : '';
 }
 
 export async function whisperMessage(
   player: string,
   message: string
 ): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute(`/w ${player} ${message}`);
+  const result = await sendGameCommand(`/w ${player} ${message}`);
+  return result.ok ? result.value : '';
 }
 
 export async function giveItem(
@@ -132,6 +124,6 @@ export async function giveItem(
   item: string,
   count = 1
 ): Promise<string> {
-  const pool = getRconPool();
-  return pool.execute(`/give ${player} ${item} ${count}`);
+  const result = await sendGameCommand(`/give ${player} ${item} ${count}`);
+  return result.ok ? result.value : '';
 }

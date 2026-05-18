@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { verifyToken } from '../../plugins/jwt.js';
-import type { JwtPayload } from '../../plugins/jwt.js';
+import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import * as service from './mod.service.js';
 import {
   modToggleSchema,
@@ -9,26 +8,12 @@ import {
   modInstallFromPortalSchema,
 } from './mod.schema.js';
 
-async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<JwtPayload> {
-  const authHeader = request.headers.authorization;
-  if (!authHeader) { reply.status(401).send({ success: false, error: '缺少认证令牌' }); throw new Error(); }
-  try { return verifyToken(authHeader.replace(/^Bearer\s+/i, '')); }
-  catch { reply.status(401).send({ success: false, error: '令牌无效或已过期' }); throw new Error(); }
-}
-
-function requireAdmin(payload: JwtPayload, reply: FastifyReply): void {
-  if (payload.role !== 'admin') { reply.status(403).send({ success: false, error: '权限不足，需要管理员角色' }); throw new Error(); }
-}
-
 export default async function modRoutes(app: FastifyInstance) {
-  app.get('/api/mod/list', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/mod/list', { preHandler: [authenticate] }, async (request, reply) => {
     return reply.send({ success: true, data: service.listInstalledMods() });
   });
 
-  app.post('/api/mod/toggle', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/mod/toggle', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = modToggleSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -46,9 +31,7 @@ export default async function modRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/mod/uninstall', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/mod/uninstall', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = modUninstallSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -66,8 +49,7 @@ export default async function modRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/mod/dependencies/:id', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/mod/dependencies/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       const deps = service.getModDependencies(parseInt(id, 10));
@@ -78,9 +60,7 @@ export default async function modRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/mod/check-conflicts', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/mod/check-conflicts', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = modCheckConflictsSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -93,22 +73,17 @@ export default async function modRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: { conflicts } });
   });
 
-  app.get('/api/mod/check-updates', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.get('/api/mod/check-updates', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const result = await service.checkForUpdates();
     return reply.send({ success: true, data: result });
   });
 
-  app.post('/api/mod/sync', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
+  app.post('/api/mod/sync', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const result = service.syncFromFilesystem();
     return reply.send({ success: true, data: result });
   });
 
-  app.get('/api/mod/portal/search', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/mod/portal/search', { preHandler: [authenticate] }, async (request, reply) => {
     const { query, page, page_size, sort, order } = (request.query || {}) as {
       query?: string;
       page?: string;
@@ -142,8 +117,7 @@ export default async function modRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/mod/portal/:name', async (request, reply) => {
-    let _p; try { _p = await authenticate(request, reply); } catch { return; }
+  app.get('/api/mod/portal/:name', { preHandler: [authenticate] }, async (request, reply) => {
     const { name } = request.params as { name: string };
 
     try {
@@ -164,10 +138,7 @@ export default async function modRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/mod/portal/install', async (request, reply) => {
-    let p; try { p = await authenticate(request, reply); } catch { return; }
-    try { requireAdmin(p, reply); } catch { return; }
-
+  app.post('/api/mod/portal/install', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = modInstallFromPortalSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({

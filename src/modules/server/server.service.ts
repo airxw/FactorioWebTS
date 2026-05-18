@@ -3,8 +3,10 @@ import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getRconPool, closeRconPool } from '../../lib/rcon.js';
+import { sendGameCommand } from '../../lib/game-command-bus.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../lib/logger.js';
+import { wsManager } from '../../plugins/websocket.js';
 import { resetLogWatcher } from '../../lib/log-watcher.js';
 import {
   resolveLogPath,
@@ -13,9 +15,24 @@ import {
   findFactorioBinary,
 } from '../../lib/paths.js';
 
-const runningCache = new Map<string, { value: boolean; timestamp: number }>();
-const CACHE_TTL_MS = 3000;
+export const ServerState = {
+  UNKNOWN: 'unknown',
+  OFF: 'off',
+  STARTING: 'starting',
+  RUNNING: 'running',
+  STOPPING: 'stopping',
+  ERROR: 'error',
+} as const;
 
+export type ServerStateValue = (typeof ServerState)[keyof typeof ServerState];
+
+const BLOCKED_COMMANDS = [/shutdown/i, /quit/i, /exit/i, /^lua\s*=/i];
+const MAX_COMMAND_LENGTH = 500;
+const RCON_READY_POLL_MS = 2000;
+const RCON_READY_TIMEOUT_MS = 60000;
+const PROCESS_EXIT_TIMEOUT_MS = 20000;
+
+let state: ServerStateValue = ServerState.UNKNOWN;
 let serverProcess: ChildProcess | null = null;
 let serverStartTime = 0;
 let serverVersion = '';
@@ -23,231 +40,125 @@ let serverLogPath = '';
 let lastExitCode: number | null = null;
 let lastExitSignal: string | null = null;
 let lastExitError = '';
+let currentSaveName = '';
+let currentConfigName = '';
 let stoppingRequestedAt = 0;
 
-const BLOCKED_COMMANDS = [
-  /shutdown/i,
-  /quit/i,
-  /exit/i,
-  /^lua\s*=/i,
-];
+function setState(newState: ServerStateValue): void {
+  const prev = state;
+  if (prev === newState) return;
 
-const MAX_COMMAND_LENGTH = 500;
+  const allowed: Record<ServerStateValue, ServerStateValue[]> = {
+    [ServerState.UNKNOWN]: [ServerState.OFF, ServerState.RUNNING, ServerState.STARTING, ServerState.STOPPING, ServerState.ERROR],
+    [ServerState.OFF]: [ServerState.STARTING],
+    [ServerState.STARTING]: [ServerState.RUNNING, ServerState.ERROR, ServerState.OFF],
+    [ServerState.RUNNING]: [ServerState.STOPPING, ServerState.ERROR],
+    [ServerState.STOPPING]: [ServerState.OFF, ServerState.ERROR],
+    [ServerState.ERROR]: [ServerState.OFF, ServerState.STARTING],
+  };
+
+  if (!allowed[prev]?.includes(newState)) {
+    logger.warn({ from: prev, to: newState }, '[Server] Invalid state transition blocked');
+    return;
+  }
+
+  state = newState;
+  logger.info({ from: prev, to: newState }, '[Server] State changed');
+  broadcastState();
+}
+
+function broadcastState(): void {
+  wsManager.broadcast('server_state', {
+    state,
+    version: serverVersion,
+    saveName: currentSaveName,
+    configName: currentConfigName,
+    lastExitCode,
+    lastExitSignal,
+    lastExitError,
+    startTime: serverStartTime,
+  }, true);
+}
+
+export function getServerState(): {
+  state: ServerStateValue;
+  version: string;
+  saveName: string;
+  configName: string;
+  startTime: number;
+  lastExitCode: number | null;
+  lastExitError: string;
+} {
+  return {
+    state,
+    version: serverVersion,
+    saveName: currentSaveName,
+    configName: currentConfigName,
+    startTime: serverStartTime,
+    lastExitCode,
+    lastExitError,
+  };
+}
 
 function validateCommand(command: string): void {
   if (!command || typeof command !== 'string') {
-    throw new AppError('命令不能为空', 400);
+    throw new AppError('Command cannot be empty', 400);
   }
-
   if (command.length > MAX_COMMAND_LENGTH) {
-    throw new AppError(`命令过长（最大 ${MAX_COMMAND_LENGTH} 字符）`, 400);
+    throw new AppError(`Command too long (max ${MAX_COMMAND_LENGTH} chars)`, 400);
   }
-
   if (/[;\r\n\x00]/.test(command)) {
-    throw new AppError('命令包含非法字符', 400);
+    throw new AppError('Command contains illegal characters', 400);
   }
-
   for (const pattern of BLOCKED_COMMANDS) {
     if (pattern.test(command)) {
-      throw new AppError('该命令被禁止执行', 403);
+      throw new AppError('This command is blocked', 403);
     }
   }
 }
 
-async function checkRconRunning(): Promise<boolean> {
-  const cached = runningCache.get('rcon');
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.value;
-  }
-
-  const pool = getRconPool();
-  const response = await pool.execute('/version');
-
-  const running = response.length > 0 && !response.toLowerCase().includes('error');
-  runningCache.set('rcon', { value: running, timestamp: Date.now() });
-
-  return running;
-}
-
-export async function isRunning(): Promise<boolean> {
-  return checkRconRunning();
-}
-
-function findOrphanFactorioPid(): number | null {
+function findFactorioPid(): number | null {
   try {
-    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 2000 }).toString().trim();
+    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 2000 })
+      .toString()
+      .trim();
     if (!stdout) return null;
-    const pids = stdout.split('\n').map(s => s.trim()).filter(Boolean);
-    return pids.length > 0 ? parseInt(pids[0], 10) : null;
+    return parseInt(stdout.split('\n')[0].trim(), 10);
   } catch {
     return null;
   }
 }
 
-export function getServerProcessInfo(): {
-  running: boolean;
-  pid: number | null;
-  startTime: number;
-  version: string;
-  logPath: string;
-} {
-  let isAlive = serverProcess !== null && serverProcess.exitCode === null && serverProcess.killed === false;
-  let pid = serverProcess?.pid ?? null;
-
-  if (!isAlive) {
-    if (stoppingRequestedAt > 0 && Date.now() - stoppingRequestedAt < 20000) {
-      return { running: false, pid: null, startTime: 0, version: serverVersion, logPath: serverLogPath };
-    }
-    const orphanPid = findOrphanFactorioPid();
-    if (orphanPid) {
-      isAlive = true;
-      pid = orphanPid;
-      if (serverStartTime === 0) serverStartTime = Date.now();
-    }
-  }
-
-  return {
-    running: isAlive,
-    pid,
-    startTime: serverStartTime,
-    version: serverVersion,
-    logPath: serverLogPath,
-  };
-}
-
-export async function getStatus(): Promise<{
-  running: boolean;
-  version: string;
-  players: string[];
-  playerCount: number;
-  processRunning: boolean;
-  pid: number | null;
-  uptime: number;
-  logPath: string;
-  lastExitCode: number | null;
-  lastExitSignal: string | null;
-  lastExitError: string;
-}> {
-  const running = await checkRconRunning();
-  const procInfo = getServerProcessInfo();
-
-  let version = 'unknown';
-  const players: string[] = [];
-  let playerCount = 0;
-
-  if (running) {
-    const pool = getRconPool();
-
-    const versionRes = await pool.execute('/version');
-    const versionMatch = versionRes.match(/Version:\s*([\d.]+)/i);
-    if (versionMatch) {
-      version = versionMatch[1];
-    }
-
-    const playersRes = await pool.execute('/players');
-    if (playersRes) {
-      const playerMatches = playersRes.matchAll(/(\S+)\s+\(online\)/gi);
-      for (const m of playerMatches) {
-        players.push(m[1]);
-      }
-      playerCount = players.length;
-    }
-  }
-
-  const uptime = procInfo.startTime > 0 ? Math.floor((Date.now() - procInfo.startTime) / 1000) : 0;
-
-  return {
-    running,
-    version,
-    players,
-    playerCount,
-    processRunning: procInfo.running,
-    pid: procInfo.pid,
-    uptime,
-    logPath: procInfo.logPath || serverLogPath,
-    lastExitCode,
-    lastExitSignal,
-    lastExitError,
-  };
-}
-
-export async function startServer(
-  version?: string,
-  map?: string,
-  config?: string
-): Promise<{ message: string; processRunning: boolean }> {
-  const running = await checkRconRunning();
-  if (running) {
-    return { message: '服务器已在运行中', processRunning: true };
-  }
-
-  if (serverProcess && serverProcess.exitCode === null) {
-    return { message: '服务器进程已在运行中', processRunning: true };
-  }
-
-  if (findOrphanFactorioPid()) {
-    return { message: '服务器进程已在运行中（孤儿进程），请先停止', processRunning: true };
-  }
-
-  const savesDir = resolveSavesDir();
-  const configDir = resolveConfigDir();
-
-  if (!map) {
-    throw new AppError('请选择要加载的地图存档', 400);
-  }
-
-  const savePath = path.join(savesDir, map);
-  if (!existsSync(savePath)) {
-    throw new AppError(`存档文件不存在: ${map}`, 400);
-  }
-
-  const serverSettingsFile = config || 'server-settings.json';
-  const serverSettingsPath = path.join(configDir, serverSettingsFile);
-  if (!existsSync(serverSettingsPath)) {
-    throw new AppError(`服务器配置文件不存在: ${serverSettingsFile}`, 400);
-  }
-
-  const { binPath, rootDir } = findFactorioBinary(version);
-
-  let rconPort = 0;
-  let rconPassword = '';
+function killAllFactorioProcesses(): boolean {
   try {
-    const raw = readFileSync(serverSettingsPath, 'utf-8');
-    const settings = JSON.parse(raw);
-    rconPort = parseInt(settings.rcon_port || settings['rcon-port'] || '0', 10);
-    rconPassword = settings.rcon_password || settings['rcon-password'] || '';
-  } catch {}
-
-  const args = [
-    '--start-server', savePath,
-    '--server-settings', serverSettingsPath,
-  ];
-
-  if (rconPort > 0 && rconPort <= 65535 && rconPassword) {
-    args.push('--rcon-port', String(rconPort));
-    args.push('--rcon-password', rconPassword);
+    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 3000 })
+      .toString()
+      .trim();
+    if (!stdout) return false;
+    const pids = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(parseInt(pid, 10), 'SIGTERM');
+        logger.info({ pid }, 'Sent SIGTERM to Factorio process');
+      } catch {}
+    }
+    return pids.length > 0;
+  } catch {
+    return false;
   }
+}
 
-  const logPath = resolveLogPath(version);
-  const logDir = path.dirname(logPath);
-  try { mkdirSync(logDir, { recursive: true }); } catch {}
+async function waitForProcessExit(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pid = findFactorioPid();
+    if (!pid) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  killAllFactorioProcesses();
+}
 
-  serverLogPath = logPath;
-  serverVersion = version || '';
-
-  logger.info({ binPath, args, cwd: rootDir, logPath }, '正在启动 Factorio 服务器');
-
-  const child = spawn(binPath, args, {
-    cwd: rootDir,
-    env: { ...process.env },
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  serverProcess = child;
-  serverStartTime = Date.now();
-  stoppingRequestedAt = 0;
-
+function attachProcessListeners(child: ChildProcess, logPath: string): void {
   child.stdout?.on('data', (data: Buffer) => {
     const msg = data.toString().trim();
     if (!msg) return;
@@ -263,185 +174,364 @@ export async function startServer(
   });
 
   child.on('error', (err: Error) => {
-    logger.error({ err }, 'Factorio 进程启动失败');
+    logger.error({ err }, 'Factorio process start failed');
     lastExitError = err.message;
-    try { appendFileSync(logPath, `[ERROR] 启动失败: ${err.message}\n`, 'utf-8'); } catch {}
+    try { appendFileSync(logPath, `[ERROR] Start failed: ${err.message}\n`, 'utf-8'); } catch {}
     serverProcess = null;
-    invalidateCache();
+    serverStartTime = 0;
+    setState(ServerState.ERROR);
   });
 
   child.on('exit', (code: number | null, signal: string | null) => {
     lastExitCode = code;
     lastExitSignal = signal;
     if (code !== 0) {
-      const msg = `[ERROR] Factorio 进程异常退出 (code=${code}, signal=${signal})`;
+      const msg = `[ERROR] Factorio process exited abnormally (code=${code}, signal=${signal})`;
       lastExitError = msg;
       logger.error({ exitCode: code, signal }, msg);
       try { appendFileSync(logPath, msg + '\n', 'utf-8'); } catch {}
+      setState(ServerState.ERROR);
     } else {
       lastExitError = '';
       lastExitCode = null;
       lastExitSignal = null;
-      logger.info({ exitCode: code }, 'Factorio 进程已退出');
+      logger.info({ exitCode: code }, 'Factorio process exited');
+      setState(ServerState.OFF);
     }
     serverProcess = null;
     serverStartTime = 0;
-    invalidateCache();
   });
 
   child.on('close', (code: number | null, signal: string | null) => {
-    logger.info({ exitCode: code, signal }, 'Factorio 进程已关闭');
+    logger.info({ exitCode: code, signal }, 'Factorio process closed');
+  });
+}
+
+async function waitForRconReady(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await sendGameCommand('/version');
+    if (result.ok && result.value.length > 0 && !result.value.toLowerCase().includes('error')) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, RCON_READY_POLL_MS));
+  }
+  return false;
+}
+
+async function tryDetectRunning(): Promise<void> {
+  const result = await sendGameCommand('/version');
+  if (result.ok && result.value.length > 0 && !result.value.toLowerCase().includes('error')) {
+    const vm = result.value.match(/Version:\s*([\d.]+)/i);
+    if (vm) serverVersion = vm[1];
+    serverStartTime = serverStartTime || Date.now();
+    setState(ServerState.RUNNING);
+    return;
+  }
+
+  const pid = findFactorioPid();
+  if (pid) {
+    setState(ServerState.STARTING);
+    const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
+    if (ready) {
+      setState(ServerState.RUNNING);
+    }
+    return;
+  }
+
+  setState(ServerState.OFF);
+}
+
+export async function isRunning(): Promise<boolean> {
+  if (state === ServerState.UNKNOWN) {
+    await tryDetectRunning();
+  }
+  return state === ServerState.RUNNING || state === ServerState.STARTING;
+}
+
+export function getServerProcessInfo(): {
+  pid: number | null;
+  state: ServerStateValue;
+  startTime: number;
+  version: string;
+  logPath: string;
+} {
+  const pid = serverProcess?.pid ?? findFactorioPid();
+  return { pid, state, startTime: serverStartTime, version: serverVersion, logPath: serverLogPath };
+}
+
+export async function getStatus(): Promise<{
+  running: boolean;
+  state: ServerStateValue;
+  version: string;
+  players: string[];
+  playerCount: number;
+  pid: number | null;
+  uptime: number;
+  logPath: string;
+  lastExitCode: number | null;
+  lastExitSignal: string | null;
+  lastExitError: string;
+}> {
+  if (state === ServerState.UNKNOWN) {
+    await tryDetectRunning();
+  }
+
+  const running = state === ServerState.RUNNING;
+  const procInfo = getServerProcessInfo();
+  const players: string[] = [];
+  let playerCount = 0;
+  let version = serverVersion || 'unknown';
+
+  if (running) {
+    const versionRes = await sendGameCommand('/version');
+    if (versionRes.ok) {
+      const versionMatch = versionRes.value.match(/Version:\s*([\d.]+)/i);
+      if (versionMatch) version = versionMatch[1];
+    }
+
+    const playersRes = await sendGameCommand('/players');
+    if (playersRes.ok && playersRes.value) {
+      for (const m of playersRes.value.matchAll(/(\S+)\s+\(online\)/gi)) {
+        players.push(m[1]);
+      }
+      playerCount = players.length;
+    }
+  }
+
+  const uptime = procInfo.startTime > 0 ? Math.floor((Date.now() - procInfo.startTime) / 1000) : 0;
+
+  return {
+    running,
+    state,
+    version,
+    players,
+    playerCount,
+    pid: procInfo.pid,
+    uptime,
+    logPath: procInfo.logPath || serverLogPath,
+    lastExitCode,
+    lastExitSignal,
+    lastExitError,
+  };
+}
+
+export async function startServer(
+  version?: string,
+  map?: string,
+  config?: string
+): Promise<{ message: string }> {
+  if (state === ServerState.UNKNOWN) await tryDetectRunning();
+
+  if (state === ServerState.RUNNING) {
+    return { message: 'Server is already running' };
+  }
+  if (state === ServerState.STARTING) {
+    return { message: 'Server is starting, please wait...' };
+  }
+  if (state === ServerState.STOPPING) {
+    return { message: 'Server is stopping, please try again later' };
+  }
+
+  if (serverProcess && serverProcess.exitCode === null) {
+    return { message: 'Server process already exists' };
+  }
+
+  const orphan = findFactorioPid();
+  if (orphan) {
+    serverStartTime = serverStartTime || Date.now();
+    setState(ServerState.STARTING);
+    const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
+    if (ready) {
+      setState(ServerState.RUNNING);
+      return { message: 'Server is already running (detected existing process)' };
+    }
+    setState(ServerState.ERROR);
+    return { message: 'Detected orphan process but RCON unreachable, please stop first' };
+  }
+
+  const savesDir = resolveSavesDir();
+  const configDir = resolveConfigDir();
+
+  if (!map) throw new AppError('Please select a save file', 400);
+
+  const savePath = path.join(savesDir, map);
+  if (!existsSync(savePath)) throw new AppError(`Save file not found: ${map}`, 400);
+
+  const serverSettingsFile = config || 'server-settings.json';
+  const serverSettingsPath = path.join(configDir, serverSettingsFile);
+  if (!existsSync(serverSettingsPath))
+    throw new AppError(`Server config not found: ${serverSettingsFile}`, 400);
+
+  const { binPath, rootDir } = findFactorioBinary(version);
+
+  let rconPort = 0;
+  let rconPassword = '';
+  try {
+    const raw = readFileSync(serverSettingsPath, 'utf-8');
+    const settings = JSON.parse(raw);
+    rconPort = parseInt(settings.rcon_port || settings['rcon-port'] || '0', 10);
+    rconPassword = settings.rcon_password || settings['rcon-password'] || '';
+  } catch {}
+
+  const args = ['--start-server', savePath, '--server-settings', serverSettingsPath];
+  if (rconPort > 0 && rconPort <= 65535 && rconPassword) {
+    args.push('--rcon-port', String(rconPort));
+    args.push('--rcon-password', rconPassword);
+  }
+
+  const logPath = resolveLogPath(version);
+  const logDir = path.dirname(logPath);
+  try { mkdirSync(logDir, { recursive: true }); } catch {}
+
+  currentSaveName = map;
+  currentConfigName = serverSettingsFile;
+  serverVersion = version || '';
+  serverLogPath = logPath;
+  stoppingRequestedAt = 0;
+
+  setState(ServerState.STARTING);
+
+  logger.info({ binPath, args, cwd: rootDir, logPath }, 'Starting Factorio server');
+
+  const child = spawn(binPath, args, {
+    cwd: rootDir,
+    env: { ...process.env },
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  serverProcess = child;
+  serverStartTime = Date.now();
+  attachProcessListeners(child, logPath);
   child.unref();
 
   setTimeout(() => resetLogWatcher(logPath), 1000);
 
-  invalidateCache();
+  closeRconPool();
 
-  return {
-    message: '服务器正在启动，请稍候...',
-    processRunning: true,
-  };
+  const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
+  if (ready) {
+    setState(ServerState.RUNNING);
+    return { message: 'Server started successfully' };
+  }
+
+  if (state === ServerState.ERROR) {
+    return { message: 'Server start failed: ' + lastExitError };
+  }
+
+  logger.warn({ host: '127.0.0.1' }, 'Server started but RCON not ready yet');
+  return { message: 'Server process started, waiting for RCON...' };
 }
 
 export async function stopServer(): Promise<{ message: string }> {
-  stoppingRequestedAt = Date.now();
+  if (state === ServerState.UNKNOWN) await tryDetectRunning();
 
-  const running = await checkRconRunning();
-  if (!running && (!serverProcess || serverProcess.exitCode !== null)) {
-    const killed = killFactorioProcess();
-    serverProcess = null;
-    serverStartTime = 0;
-    if (killed) {
-      runningCache.set('rcon', { value: false, timestamp: Date.now() });
-      invalidateCache();
-      return { message: '服务器进程已终止' };
-    }
-    return { message: '服务器未在运行' };
+  if (state === ServerState.OFF) {
+    return { message: 'Server is not running' };
+  }
+  if (state === ServerState.STOPPING) {
+    return { message: 'Server is stopping...' };
   }
 
-  if (running) {
-    const pool = getRconPool();
-    try {
-      await pool.execute('/server-save');
-      logger.info('服务器存档已保存，正在发送退出命令...');
+  stoppingRequestedAt = Date.now();
+  setState(ServerState.STOPPING);
 
-      try {
-        await pool.execute('/quit');
-        logger.info('退出命令已通过 RCON 发送');
-      } catch (rconError) {
-        logger.warn({ err: rconError }, 'RCON 发送 /quit 失败，尝试使用 SIGTERM');
-        if (serverProcess && serverProcess.exitCode === null) {
-          serverProcess.kill('SIGTERM');
-        } else {
-          killFactorioProcess();
-        }
-      }
-    } catch (saveError) {
-      logger.warn({ err: saveError }, '/server-save 失败，直接发送退出命令');
-      try {
-        await pool.execute('/quit');
-      } catch {
-        if (serverProcess && serverProcess.exitCode === null) {
-          serverProcess.kill('SIGTERM');
-        } else {
-          killFactorioProcess();
-        }
-      }
+  let graceful = false;
+
+  try {
+    await sendGameCommand('/server-save');
+    logger.info('Server save completed');
+    await sendGameCommand('/quit');
+    logger.info('Quit command sent via RCON, waiting for process to exit');
+    graceful = true;
+  } catch {
+    logger.warn('RCON graceful shutdown failed, attempting SIGTERM');
+  }
+
+  if (!graceful) {
+    if (serverProcess && serverProcess.exitCode === null) {
+      serverProcess.kill('SIGTERM');
+    } else {
+      killAllFactorioProcesses();
     }
-  } else if (serverProcess && serverProcess.exitCode === null) {
-    serverProcess.kill('SIGTERM');
+  }
+
+  await waitForProcessExit(PROCESS_EXIT_TIMEOUT_MS);
+
+  const remaining = findFactorioPid();
+  if (remaining) {
+    logger.warn({ pid: remaining }, 'Process did not respond to SIGTERM, forcing kill');
+    killAllFactorioProcesses();
+    await new Promise((r) => setTimeout(r, 3000));
   }
 
   serverProcess = null;
   serverStartTime = 0;
-  runningCache.set('rcon', { value: false, timestamp: Date.now() });
-  invalidateCache();
+  currentSaveName = '';
+  currentConfigName = '';
+  closeRconPool();
+  setState(ServerState.OFF);
 
-  await waitForProcessExit(15000);
-
-  return { message: '服务器已停止' };
-}
-
-async function waitForProcessExit(timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const orphanPid = findOrphanFactorioPid();
-    if (!orphanPid) return;
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  killFactorioProcess();
-}
-
-function killFactorioProcess(): boolean {
-  try {
-    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 3000 }).toString().trim();
-    if (!stdout) return false;
-    const pids = stdout.split('\n').map(s => s.trim()).filter(Boolean);
-    for (const pid of pids) {
-      try {
-        process.kill(parseInt(pid, 10), 'SIGTERM');
-        logger.info({ pid }, '已发送 SIGTERM 到 Factorio 进程');
-      } catch { /* skip */ }
-    }
-    return pids.length > 0;
-  } catch {
-    return false;
-  }
+  return { message: 'Server stopped' };
 }
 
 export async function restartServer(): Promise<{ message: string }> {
-  await stopServer();
+  if (state === ServerState.UNKNOWN) await tryDetectRunning();
 
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  try {
-    const running = await checkRconRunning();
-    if (running) {
-      return { message: '服务器仍在运行，请先手动停止' };
-    }
-
-    const savesDir = resolveSavesDir();
-    const saves = existsSync(savesDir)
-      ? readdirSync(savesDir).filter(f => f.endsWith('.zip'))
-      : [];
-
-    if (saves.length === 0) {
-      return { message: '没有找到存档文件，无法自动重启' };
-    }
-
-    const configDir = resolveConfigDir();
-    const configFile = existsSync(path.join(configDir, 'server-settings.json'))
-      ? 'server-settings.json'
-      : undefined;
-
-    const result = await startServer(serverVersion || undefined, saves[0], configFile);
-    return { message: result.message };
-  } catch (e) {
-    const err = e as { message: string };
-    throw new AppError(`重启失败: ${err.message}`, 500);
+  if (state !== ServerState.RUNNING) {
+    return { message: 'Server is not running, cannot restart' };
   }
+
+  const savedVersion = serverVersion;
+  const savedMap = currentSaveName;
+  const savedConfig = currentConfigName;
+
+  const stopResult = await stopServer();
+  logger.info({ stopResult: stopResult.message }, 'Restart: stop completed');
+
+  await new Promise((r) => setTimeout(r, 2000));
+
+  if (state === ServerState.OFF) {
+    const mapToStart = savedMap || (() => {
+      const savesDir = resolveSavesDir();
+      const saves = existsSync(savesDir)
+        ? readdirSync(savesDir).filter((f) => f.endsWith('.zip'))
+        : [];
+      return saves[0] || undefined;
+    })();
+
+    if (!mapToStart) {
+      setState(ServerState.ERROR);
+      return { message: 'No save file found, cannot auto-restart' };
+    }
+
+    try {
+      return (await startServer(savedVersion || undefined, mapToStart, savedConfig || undefined)).message
+        ? { message: 'Server is restarting...' }
+        : { message: 'Server restarted successfully' };
+    } catch (e) {
+      const err = e as { message: string };
+      throw new AppError(`Restart failed: ${err.message}`, 500);
+    }
+  }
+
+  return { message: 'Server state abnormal during restart' };
 }
 
 export async function saveGame(): Promise<{ message: string }> {
-  const pool = getRconPool();
-  const response = await pool.execute('/server-save');
-
-  if (response) {
-    return { message: '保存成功' };
-  }
-  return { message: '保存命令已发送' };
+  const result = await sendGameCommand('/server-save');
+  if (result.ok) return { message: 'Save successful' };
+  return { message: 'Save command sent' };
 }
 
 export async function sendConsole(command: string): Promise<string> {
   validateCommand(command);
-  const pool = getRconPool();
-  return pool.execute(command);
+  const result = await sendGameCommand(command);
+  return result.ok ? result.value : '';
 }
 
 export function invalidateCache(): void {
-  runningCache.clear();
   closeRconPool();
 }
 
@@ -477,20 +567,14 @@ export async function getSystemStats(): Promise<{
 
   let onlinePlayers = 0;
   try {
-    const pool = getRconPool();
-    const playersRes = await pool.execute('/players');
-    if (playersRes) {
-      const playerMatches = playersRes.matchAll(/(\S+)\s+\(online\)/gi);
+    const result = await sendGameCommand('/players');
+    if (result.ok && result.value) {
+      const playerMatches = result.value.matchAll(/(\S+)\s+\(online\)/gi);
       onlinePlayers = [...playerMatches].length;
     }
   } catch {
     onlinePlayers = 0;
   }
 
-  return {
-    cpu_percent: cpuPercent,
-    memory_percent: memoryPercent,
-    disk_percent: diskPercent,
-    online_players: onlinePlayers,
-  };
+  return { cpu_percent: cpuPercent, memory_percent: memoryPercent, disk_percent: diskPercent, online_players: onlinePlayers };
 }

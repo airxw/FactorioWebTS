@@ -2,7 +2,7 @@ import { getDb } from '../../lib/database.js';
 import * as repo from './chat.repository.js';
 import type { TriggerResponseInput, ServerResponseInput, PeriodicMessageInput, PlayerEventInput } from './chat.schema.js';
 import { AppError } from '../../types/index.js';
-import { executeRconCommand } from '../../lib/rcon-pool.js';
+import { sendGameCommand, fireAndForget } from '../../lib/game-command-bus.js';
 import { getOnlinePlayers } from '../player/player.service.js';
 import { recordEvent } from '../player/player.repository.js';
 import { existsSync, readFileSync } from 'node:fs';
@@ -70,9 +70,7 @@ async function sendGiftItems(playerName: string, items: GiftItem[]): Promise<voi
     if (item.quality && item.quality !== 'normal') {
       command += ` ${item.quality}`;
     }
-    try {
-      await executeRconCommand(command);
-    } catch {}
+    fireAndForget(command);
   }
 }
 
@@ -92,7 +90,7 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
   if (isFirstJoin) {
     if (isEnabled(settings.first_join_enabled) && settings.first_join_message) {
       const msg = replaceMessageVariables(settings.first_join_message, playerName, onlineCount);
-      try { await executeRconCommand(`/say ${msg}`); } catch (e) { console.error('[Chat] 发送首次加入消息失败:', e); }
+      fireAndForget(`/say ${msg}`);
     }
     if (isEnabled(settings.first_gift_enabled) && settings.first_gift_items) {
       try {
@@ -101,12 +99,12 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
           await sendGiftItems(playerName, items);
           repo.addGiftClaim(db, playerName, 'first', settings.first_gift_items);
         }
-      } catch (e) { console.error('[Chat] 发送首次礼包失败:', e); }
+      } catch (e) { console.error('[Chat] Send first-gift failed:', e); }
     }
   } else {
     if (isEnabled(settings.join_enabled) && settings.join_message) {
       const msg = replaceMessageVariables(settings.join_message, playerName, onlineCount);
-      try { await executeRconCommand(`/say ${msg}`); } catch (e) { console.error('[Chat] 发送加入消息失败:', e); }
+      fireAndForget(`/say ${msg}`);
     }
   }
 
@@ -136,7 +134,7 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
           }
         }
       }
-    } catch (e) { console.error('[Chat] 发送回归礼包失败:', e); }
+    } catch (e) { console.error('[Chat] Send relogin gift failed:', e); }
   }
 }
 
@@ -153,9 +151,10 @@ export async function processPlayerLeave(playerName: string): Promise<void> {
       onlineCount = Math.max(0, players.length - 1);
     } catch {}
     const msg = replaceMessageVariables(settings.leave_message, playerName, onlineCount);
-    try { await executeRconCommand(`/say ${msg}`); } catch (e) { console.error('[Chat] 发送离开消息失败:', e); }
+    fireAndForget(`/say ${msg}`);
   }
 }
+
 export function getChatSettings(): Record<string, string> {
   return repo.getChatSettings(getDb());
 }
@@ -185,7 +184,7 @@ export function addTriggerResponse(data: TriggerResponseInput) {
 
 export function deleteTriggerResponse(id: number): void {
   const ok = repo.deleteTriggerResponse(getDb(), id);
-  if (!ok) throw new AppError('触发器不存在', 404);
+  if (!ok) throw new AppError('Trigger not found', 404);
 }
 
 export function updateTriggerResponse(id: number, data: { trigger_text?: string; response_text?: string; case_sensitive?: number; enabled?: number }): boolean {
@@ -208,7 +207,7 @@ export function saveServerResponse(data: ServerResponseInput) {
 
 export function deleteServerResponse(response_key: string): void {
   const ok = repo.deleteServerResponse(getDb(), response_key);
-  if (!ok) throw new AppError('响应不存在', 404);
+  if (!ok) throw new AppError('Response not found', 404);
 }
 
 export function listPeriodicMessages() {
@@ -230,17 +229,17 @@ export function addPeriodicMessage(data: PeriodicMessageInput) {
 
 export function updatePeriodicMessage(id: number, data: Partial<PeriodicMessageInput>): void {
   const ok = repo.updatePeriodicMessage(getDb(), id, data);
-  if (!ok) throw new AppError('周期消息不存在', 404);
+  if (!ok) throw new AppError('Periodic message not found', 404);
 }
 
 export function deletePeriodicMessage(id: number): void {
   const ok = repo.deletePeriodicMessage(getDb(), id);
-  if (!ok) throw new AppError('周期消息不存在', 404);
+  if (!ok) throw new AppError('Periodic message not found', 404);
 }
 
 export function togglePeriodicMessage(id: number, enabled: number): void {
   const ok = repo.togglePeriodicMessage(getDb(), id, enabled);
-  if (!ok) throw new AppError('周期消息不存在', 404);
+  if (!ok) throw new AppError('Periodic message not found', 404);
 }
 
 export function getPlayerEvents() {

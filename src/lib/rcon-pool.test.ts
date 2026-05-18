@@ -6,7 +6,7 @@ describe('RconPool', () => {
 
   beforeEach(() => {
     closeRconPool();
-    pool = new RconPool(3, 5000);
+    pool = new RconPool(3, 5000, 3000, 60000);
   });
 
   afterEach(() => {
@@ -23,39 +23,36 @@ describe('RconPool', () => {
 
   it('should handle execute when no server is running', async () => {
     const result = await pool.execute('/players');
-    expect(result).toBe('');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(['CONNECTION_FAILED', 'CONNECT_TIMEOUT', 'CONNECTION_FAILED']).toContain(result.error.code);
+    }
   });
 
   it('should track connection counts correctly after acquire attempts', async () => {
-    const conn = await pool.acquire();
+    const connResult = await pool.acquire();
 
-    if (conn) {
+    if (connResult.ok) {
       expect(pool.totalCount).toBeGreaterThan(0);
       expect(pool.activeCount).toBeGreaterThan(0);
-      pool.release(conn);
+      pool.release(connResult.value);
       expect(pool.idleCount).toBeGreaterThan(0);
     }
   });
 
   it('should release connections back to pool', async () => {
-    const conn = await pool.acquire();
-    if (!conn) return;
+    const connResult = await pool.acquire();
+    if (!connResult.ok) return;
 
     expect(pool.idleCount).toBe(0);
-    pool.release(conn);
+    pool.release(connResult.value);
     expect(pool.idleCount).toBe(1);
   });
 
   it('should handle multiple release calls safely', () => {
     const conn = { isConnected: () => false, disconnect: () => {} } as any;
     pool.release(conn);
-
     expect(pool.totalCount).toBe(0);
-  });
-
-  it('should return empty string from execute when connection fails', async () => {
-    const result = await pool.execute('/nonexistent');
-    expect(result).toBe('');
   });
 
   it('should clean up on closeAll', () => {
@@ -74,7 +71,6 @@ describe('RconPool singleton', () => {
     const p1 = getRconPool();
     const p2 = getRconPool();
     expect(p1).toBe(p2);
-
     p1.closeAll();
   });
 });

@@ -41,15 +41,15 @@
                                     <div class="status-version" x-text="'版本: ' + (serverVersion || '未知')"></div>
                                 </div>
                                 <div class="status-actions" x-show="isAdmin">
-                                    <button class="btn btn-primary" @click="startServer()" :disabled="isRunning">
-                                        <i class="bi bi-play-fill"></i> 启动
-                                    </button>
-                                    <button class="btn btn-danger" @click="stopServer()" :disabled="!isRunning">
-                                        <i class="bi bi-stop-fill"></i> 停止
-                                    </button>
-                                    <button class="btn btn-secondary" @click="saveGame()" :disabled="!isRunning">
-                                        <i class="bi bi-save"></i> 保存
-                                    </button>
+                                    <button class="btn btn-primary" @click="startServer()" :disabled="!canStart()">
+                    <i class="bi bi-play-fill"></i> 启动
+                </button>
+                <button class="btn btn-danger" @click="stopServer()" :disabled="!canStop()">
+                    <i class="bi bi-stop-fill"></i> 停止
+                </button>
+                <button class="btn btn-secondary" @click="saveGame()" :disabled="!canSave()">
+                    <i class="bi bi-save"></i> 保存
+                </button>
                                 </div>
                             </div>
                         </div>
@@ -143,9 +143,11 @@
     <script>
     function dashboardApp() {
       return {
+        serverState: 'unknown',
         serverStatus: '加载中...',
         serverVersion: '',
         isRunning: false,
+        isOperating: false,
         isAdmin: false,
         currentVersion: '未知',
         versionStatusText: '未知',
@@ -156,11 +158,73 @@
         installVersionInp: '',
         latestVersion: null,
         statusClass: 'status-loading',
+        stateReceived: false,
 
         init() {
           window.__dashboardInstance = this;
           SidebarMenu.initSidebarWithPermission();
           this.checkAuth();
+          this.connectWebSocket();
+        },
+
+        connectWebSocket() {
+          if (typeof wsClient !== 'undefined') {
+            wsClient.on('server_state', (data) => {
+              this.onServerState(data);
+            });
+            if (!wsClient.connected) {
+              wsClient.connect();
+            }
+          }
+        },
+
+        onServerState(data) {
+          if (!data || !data.state) return;
+          this.stateReceived = true;
+          this.serverState = data.state;
+          this.updateStatus();
+        },
+
+        updateStatus() {
+          this.isRunning = this.serverState === 'running';
+          this.serverStatus = this.serverStateText();
+          this.statusClass = this.statusClassFor();
+          try {
+            localStorage.setItem('server_running', (this.serverState === 'running' || this.serverState === 'starting') ? 'true' : 'false');
+          } catch(e) {}
+          if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
+            SidebarMenu.refresh();
+          }
+        },
+
+        serverStateText() {
+          const map = {
+            unknown: '加载中...', off: '已停止', starting: '启动中...', running: '运行中', stopping: '停止中...', error: '异常'
+          };
+          return map[this.serverState] || '未知';
+        },
+
+        statusClassFor() {
+          if (this.serverState === 'unknown') return 'status-loading';
+          if (this.serverState === 'running') return 'status-online';
+          if (this.serverState === 'starting' || this.serverState === 'stopping') return 'status-pending';
+          return 'status-offline';
+        },
+
+        canStart(): boolean {
+          if (!this.stateReceived) return false;
+          if (this.isOperating) return false;
+          return this.serverState === 'off' || this.serverState === 'error';
+        },
+
+        canStop(): boolean {
+          if (!this.stateReceived) return false;
+          if (this.isOperating) return false;
+          return this.serverState === 'running';
+        },
+
+        canSave(): boolean {
+          return this.canStop();
         },
 
         checkAuth() {
@@ -199,10 +263,10 @@
             });
             var data = await res.json();
             if (data.success && data.data) {
-              this.isRunning = data.data.running || false;
-              this.serverStatus = this.isRunning ? '运行中' : '已停止';
+              this.serverState = data.data.state || 'unknown';
+              this.stateReceived = true;
+              this.updateStatus();
               this.serverVersion = data.data.version || '';
-              this.statusClass = this.isRunning ? 'status-online' : 'status-offline';
             }
           } catch(e) { /* ignore */ }
         },
@@ -324,6 +388,11 @@
         },
 
         async startServer() {
+          if (!this.canStart()) {
+            this.showToast('当前状态不允许启动', 'error');
+            return;
+          }
+          this.isOperating = true;
           try {
             var res = await fetch('/api/server/start', {
               method: 'POST',
@@ -333,38 +402,45 @@
             var data = await res.json();
             if (!data.success) {
               this.showToast(data.error || '启动失败', 'error');
+              this.isOperating = false;
               return;
             }
             
             this.showToast('正在启动服务器...', 'info');
-            
-            for (var i = 0; i < 10; i++) {
-              await new Promise(r => setTimeout(r, 1500));
-              await this.loadServerStatus();
-              if (this.isRunning) {
-                this.showToast('服务器启动成功', 'success');
-                return;
-              }
-            }
-            
-            this.showToast('服务器启动超时，请检查日志', 'error');
           } catch(e) { 
             this.showToast('启动失败: ' + (e.message || '未知错误'), 'error');
+            this.isOperating = false;
           }
         },
 
         async stopServer() {
+          if (!this.canStop()) {
+            this.showToast('当前状态不允许停止', 'error');
+            return;
+          }
+          this.isOperating = true;
           var confirmed = await window.showConfirm({ title: '停止服务器', content: '确定要停止服务器吗？', danger: true });
-          if (!confirmed) return;
+          if (!confirmed) {
+            this.isOperating = false;
+            return;
+          }
           try {
             var res = await fetch('/api/server/stop', { method: 'POST', headers: this.authHeaders() });
             var data = await res.json();
             this.showToast(data.success ? '服务器已停止' : (data.error || '停止失败'), data.success ? 'success' : 'error');
             this.loadServerStatus();
-          } catch(e) { this.showToast('网络错误', 'error'); }
+            this.isOperating = false;
+          } catch(e) {
+            this.showToast('网络错误', 'error');
+            this.isOperating = false;
+          }
         },
 
         async saveGame() {
+          if (!this.canSave()) {
+            this.showToast('当前状态不允许保存', 'error');
+            return;
+          }
           try {
             var res = await fetch('/api/server/save', { method: 'POST', headers: this.authHeaders() });
             var data = await res.json();

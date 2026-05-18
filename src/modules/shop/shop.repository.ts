@@ -261,7 +261,7 @@ export function countUserOrdersToday(
 export function updateOrderStatus(
   db: Database.Database,
   id: number,
-  status: 'pending' | 'delivered' | 'cancelled',
+  status: 'pending' | 'delivered' | 'cancelled' | 'failed',
   extra?: { delivered_to_player?: string; delivered_at?: number; rcon_command?: string }
 ): boolean {
   const sets = ['status = @status', 'updated_at = @updated_at'];

@@ -3,6 +3,16 @@ import * as service from './server.service.js';
 import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 
 export default async function serverRoutes(app: FastifyInstance) {
+  app.get('/api/server/state', { preHandler: [authenticate] }, async (_request, reply) => {
+    try {
+      const stateInfo = service.getServerState();
+      return reply.send({ success: true, data: stateInfo });
+    } catch (e) {
+      const err = e as { message: string };
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
   app.get('/api/server/status', { preHandler: [authenticate] }, async (request, reply) => {
     const status = await service.getStatus();
     return reply.send({ success: true, data: status });
@@ -39,12 +49,11 @@ export default async function serverRoutes(app: FastifyInstance) {
     if (!command) {
       return reply.status(400).send({ success: false, error: 'command 不能为空' });
     }
-
     const response = await service.sendConsole(command);
     return reply.send({ success: true, data: { response } });
   });
 
-  app.get('/api/server/is-running', async (_request, reply) => {
+  app.get('/api/server/is-running', { preHandler: [authenticate] }, async (_request, reply) => {
     try {
       const running = await service.isRunning();
       return reply.send({ success: true, data: { running } });

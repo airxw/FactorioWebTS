@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import * as service from './shop.service.js';
-import { verifyToken } from '../../plugins/jwt.js';
-import type { JwtPayload } from '../../plugins/jwt.js';
+import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import { getDb } from '../../lib/database.js';
 import * as authRepo from '../auth/auth.repository.js';
 import {
@@ -11,28 +10,6 @@ import {
   createOrderBatchSchema,
   createItemRequestSchema,
 } from './shop.schema.js';
-
-function authenticate(request: FastifyRequest, reply: FastifyReply): JwtPayload | null {
-  const header = request.headers.authorization;
-  if (!header) {
-    reply.status(401).send({ success: false, error: '缺少认证令牌' });
-    return null;
-  }
-  try {
-    return verifyToken(header.replace(/^Bearer\s+/i, ''));
-  } catch {
-    reply.status(401).send({ success: false, error: '令牌无效或已过期' });
-    return null;
-  }
-}
-
-function requireAdmin(payload: JwtPayload, reply: FastifyReply): boolean {
-  if (payload.role !== 'admin') {
-    reply.status(403).send({ success: false, error: '权限不足' });
-    return false;
-  }
-  return true;
-}
 
 function getUserVipLevel(userId: number): number {
   const db = getDb();
@@ -46,11 +23,7 @@ function getUserVipLevel(userId: number): number {
 }
 
 export default async function shopRoutes(app: FastifyInstance) {
-  app.post('/api/shop/sync', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/shop/sync', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     try {
       const result = await service.syncFromGithub();
       return reply.send({ success: true, count: result.count, message: `成功同步 ${result.count} 个物品` });
@@ -93,11 +66,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/items', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/shop/items', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = createItemSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
@@ -112,11 +81,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.put('/api/shop/items/:id', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.put('/api/shop/items/:id', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = updateItemSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -132,11 +97,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete('/api/shop/items/:id', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.delete('/api/shop/items/:id', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       service.deleteItem(parseInt(id, 10));
@@ -147,17 +108,15 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/orders', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.post('/api/shop/orders', { preHandler: [authenticate] }, async (request, reply) => {
     const parsed = createOrderSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     }
 
     try {
-      const result = service.createOrder(payload.user_id, getUserVipLevel(payload.user_id), parsed.data);
+      const userId = request.currentUser.user_id;
+      const result = service.createOrder(userId, getUserVipLevel(userId), parsed.data);
       return reply.status(201).send({
         success: true,
         data: {
@@ -176,17 +135,15 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/orders/batch', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.post('/api/shop/orders/batch', { preHandler: [authenticate] }, async (request, reply) => {
     const parsed = createOrderBatchSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     }
 
     try {
-      const results = service.createBatchOrder(payload.user_id, getUserVipLevel(payload.user_id), parsed.data);
+      const userId = request.currentUser.user_id;
+      const results = service.createBatchOrder(userId, getUserVipLevel(userId), parsed.data);
       const orderNumbers = results.map((r) => r.order.order_number);
       const totalPrice = results.reduce((sum, r) => sum + r.order.total_price, 0);
 
@@ -200,13 +157,10 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/shop/orders/my', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.get('/api/shop/orders/my', { preHandler: [authenticate] }, async (request, reply) => {
     try {
       const { status } = request.query as { status?: string };
-      const orders = service.getMyOrders(payload.user_id, status);
+      const orders = service.getMyOrders(request.currentUser.user_id, status);
 
       const data = orders.map((o) => ({
         order_id: o.id,
@@ -261,13 +215,10 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/orders/:id/cancel', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.post('/api/shop/orders/:id/cancel', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
-      service.cancelOrder(payload.user_id, parseInt(id, 10));
+      service.cancelOrder(request.currentUser.user_id, parseInt(id, 10));
       return reply.send({ success: true, message: '订单已取消' });
     } catch (e) {
       const err = e as { statusCode?: number; message: string };
@@ -275,11 +226,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/orders/:id/deliver', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/shop/orders/:id/deliver', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { player_name, rcon_command } = (request.body as { player_name?: string; rcon_command?: string }) || {};
 
@@ -292,11 +239,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/api/shop/item-requests', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.get('/api/shop/item-requests', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { status } = request.query as { status?: string };
     const requests = service.getItemRequests(status);
 
@@ -315,17 +258,14 @@ export default async function shopRoutes(app: FastifyInstance) {
     return reply.send({ success: true, requests: data });
   });
 
-  app.post('/api/shop/item-requests', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-
+  app.post('/api/shop/item-requests', { preHandler: [authenticate] }, async (request, reply) => {
     const parsed = createItemRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     }
 
     try {
-      const itemRequest = service.createItemRequest(payload.user_id, {
+      const itemRequest = service.createItemRequest(request.currentUser.user_id, {
         item_id: parsed.data.item_id,
         requester: parsed.data.player_name,
         quantity: parsed.data.quantity,
@@ -338,11 +278,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/item-requests/:id/approve', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/shop/item-requests/:id/approve', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       service.approveItemRequest(parseInt(id, 10));
@@ -353,11 +289,7 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/item-requests/:id/reject', async (request, reply) => {
-    const payload = authenticate(request, reply);
-    if (!payload) return;
-    if (!requireAdmin(payload, reply)) return;
-
+  app.post('/api/shop/item-requests/:id/reject', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
       service.rejectItemRequest(parseInt(id, 10));

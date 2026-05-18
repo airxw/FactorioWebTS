@@ -1,6 +1,7 @@
 import { getDb } from './database.js';
-import { executeRconCommand } from './rcon-pool.js';
+import { sendGameCommand } from './game-command-bus.js';
 import { resolveLogPath } from './paths.js';
+import { logger } from './logger.js';
 import type {
   DbPeriodicMessage,
   DbTriggerResponse} from '../modules/chat/chat.repository.js';
@@ -106,16 +107,16 @@ export class Scheduler {
     item_count: number;
     target: string;
   }): Promise<void> {
-    try {
-      let command: string;
-      if (msg.type === 'give') {
-        command = `/give ${msg.target} ${msg.item_code} ${msg.item_count}`;
-      } else {
-        command = `/say ${msg.content}`;
-      }
-      await executeRconCommand(command);
-    } catch {
-      // RCON may be unavailable; silently ignore
+    let command: string;
+    if (msg.type === 'give') {
+      command = `/give ${msg.target} ${msg.item_code} ${msg.item_count}`;
+    } else {
+      command = `/say ${msg.content}`;
+    }
+
+    const result = await sendGameCommand(command);
+    if (!result.ok) {
+      logger.warn({ command, err: result.error }, '[Scheduler] Periodic message send failed');
     }
   }
 
@@ -135,9 +136,7 @@ export class Scheduler {
         const st = statSync(this.logFilePath);
         this.logPosition = st.size;
       }
-    } catch {
-      // Log file may not exist yet
-    }
+    } catch {}
   }
 
   private checkLogForNewChat(): void {
@@ -192,9 +191,7 @@ export class Scheduler {
           }
         }
       }
-    } catch {
-      // Silently handle file read errors
-    }
+    } catch {}
   }
 
   private parsePlayerNameFromEvent(line: string): string | null {
@@ -240,14 +237,13 @@ export class Scheduler {
       if (!matched) continue;
 
       const response = trigger.response_text.replace(/\{player\}/g, player);
-      try {
-        if (response.startsWith('/w ') || response.startsWith('/whisper ')) {
-          await executeRconCommand(response);
-        } else {
-          await executeRconCommand(`/w ${player} ${response}`);
-        }
-      } catch {
-        // RCON may be unavailable
+      const cmd = response.startsWith('/w ') || response.startsWith('/whisper ')
+        ? response
+        : `/w ${player} ${response}`;
+
+      const result = await sendGameCommand(cmd);
+      if (!result.ok) {
+        logger.warn({ response, player, err: result.error }, '[Scheduler] Auto-response failed');
       }
       break;
     }

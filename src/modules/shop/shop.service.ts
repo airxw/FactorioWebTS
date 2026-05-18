@@ -8,6 +8,9 @@ import type {
   CreateOrderBatchInput,
 } from './shop.schema.js';
 import { AppError } from '../../types/index.js';
+import { sendGameCommand } from '../../lib/game-command-bus.js';
+import { logger } from '../../lib/logger.js';
+
 const GITHUB_ITEMS_URL = 'https://raw.githubusercontent.com/airxw/factorioitem/main/items.json';
 
 interface ItemsData {
@@ -47,14 +50,14 @@ function checkVipLimits(
   if (quantity > config.single_purchase_limit) {
     return {
       allowed: false,
-      reason: `VIP${vipLevel} 单次最多购买 ${config.single_purchase_limit} 件`,
+      reason: `VIP${vipLevel} max single purchase: ${config.single_purchase_limit}`,
     };
   }
 
   if (quality > config.max_quality_level) {
     return {
       allowed: false,
-      reason: `VIP${vipLevel} 不能购买品质等级高于 ${config.max_quality_level} 的物品`,
+      reason: `VIP${vipLevel} max quality level: ${config.max_quality_level}`,
     };
   }
 
@@ -64,7 +67,7 @@ function checkVipLimits(
     if (todayCount >= config.daily_purchase_limit) {
       return {
         allowed: false,
-        reason: `VIP${vipLevel} 每日购买上限 ${config.daily_purchase_limit} 已用完`,
+        reason: `VIP${vipLevel} daily limit ${config.daily_purchase_limit} reached`,
       };
     }
   }
@@ -72,7 +75,6 @@ function checkVipLimits(
   return { allowed: true };
 }
 
-// 分类映射：将数据库中的中文分类映射为前端期望的英文分类
 const categoryMap: Record<string, string> = {
   '装备': 'equipment',
   '消耗品': 'other',
@@ -143,7 +145,7 @@ export function updateItem(
 ): DbShopItem {
   const db = getDb();
   const existing = repo.findItemById(db, id);
-  if (!existing) throw new AppError('商品不存在', 404);
+  if (!existing) throw new AppError('Item not found', 404);
   repo.updateItem(db, id, data);
   return repo.findItemById(db, id)!;
 }
@@ -151,7 +153,7 @@ export function updateItem(
 export function deleteItem(id: number): void {
   const db = getDb();
   const exists = repo.findItemById(db, id);
-  if (!exists) throw new AppError('商品不存在', 404);
+  if (!exists) throw new AppError('Item not found', 404);
   repo.deleteItem(db, id);
 }
 
@@ -163,10 +165,10 @@ export function createOrder(
   const db = getDb();
 
   const item = repo.findItemById(db, data.item_id);
-  if (!item) throw new AppError('商品不存在', 404);
-  if (!item.is_active) throw new AppError('商品已下架', 400);
+  if (!item) throw new AppError('Item not found', 404);
+  if (!item.is_active) throw new AppError('Item is not available', 400);
   if (item.stock !== -1 && item.stock < data.quantity) {
-    throw new AppError('库存不足', 400);
+    throw new AppError('Insufficient stock', 400);
   }
 
   const vipCheck = checkVipLimits(
@@ -211,10 +213,10 @@ export function createBatchOrder(
 
   for (const entry of data.items) {
     const item = repo.findItemById(db, entry.item_id);
-    if (!item) throw new AppError(`商品 ${entry.item_id} 不存在`, 404);
-    if (!item.is_active) throw new AppError(`商品 ${item.name} 已下架`, 400);
+    if (!item) throw new AppError(`Item ${entry.item_id} not found`, 404);
+    if (!item.is_active) throw new AppError(`Item ${item.name} is not available`, 400);
     if (item.stock !== -1 && item.stock < entry.quantity) {
-      throw new AppError(`商品 ${item.name} 库存不足`, 400);
+      throw new AppError(`Item ${item.name} stock insufficient`, 400);
     }
 
     const vipCheck = checkVipLimits(
@@ -278,37 +280,58 @@ export function validateOrder(
 export function cancelOrder(userId: number, orderId: number): void {
   const db = getDb();
   const order = repo.findOrderById(db, orderId);
-  if (!order) throw new AppError('订单不存在', 404);
+  if (!order) throw new AppError('Order not found', 404);
   if (order.user_id !== userId)
-    throw new AppError('无权操作此订单', 403);
+    throw new AppError('Not authorized', 403);
   if (order.status !== 'pending')
-    throw new AppError('只能取消待处理的订单', 400);
+    throw new AppError('Only pending orders can be cancelled', 400);
 
   repo.updateOrderStatus(db, orderId, 'cancelled');
 }
 
-export function deliverOrder(
+export async function deliverOrder(
   orderId: number,
   player: string,
   rconCmd: string
-): void {
+): Promise<void> {
   const db = getDb();
   const order = repo.findOrderById(db, orderId);
-  if (!order) throw new AppError('订单不存在', 404);
+  if (!order) throw new AppError('Order not found', 404);
   if (order.status !== 'pending')
-    throw new AppError('订单已处理', 400);
+    throw new AppError('Order already processed', 400);
+
+  const deliveredAt = Math.floor(Date.now() / 1000);
+
+  if (!rconCmd || !player) {
+    throw new AppError('Player name and RCON command are required for delivery', 400);
+  }
+
+  logger.info({ orderId, player, rconCmd }, '[Shop] Executing RCON delivery');
+
+  const result = await sendGameCommand(rconCmd);
+
+  if (!result.ok) {
+    repo.updateOrderStatus(db, orderId, 'failed', {
+      delivered_to_player: player,
+      delivered_at: deliveredAt,
+      rcon_command: rconCmd,
+    });
+    throw new AppError(`RCON delivery failed: ${result.error.message}`, 500);
+  }
 
   repo.updateOrderStatus(db, orderId, 'delivered', {
     delivered_to_player: player,
-    delivered_at: Math.floor(Date.now() / 1000),
+    delivered_at: deliveredAt,
     rcon_command: rconCmd,
   });
+
+  logger.info({ orderId, player }, '[Shop] Order delivered successfully');
 }
 
 export async function syncFromGithub(): Promise<{ count: number }> {
   const response = await fetch(GITHUB_ITEMS_URL);
   if (!response.ok) {
-    throw new AppError(`从GitHub获取物品数据失败: ${response.statusText}`, 500);
+    throw new AppError(`GitHub sync failed: ${response.statusText}`, 500);
   }
   const itemsData: ItemsData = await response.json();
 
@@ -367,8 +390,8 @@ export function createItemRequest(
 ): DbItemRequest {
   const db = getDb();
   const item = repo.findItemById(db, data.item_id);
-  if (!item) throw new AppError('商品不存在', 404);
-  if (!item.is_active) throw new AppError('商品已下架', 400);
+  if (!item) throw new AppError('Item not found', 404);
+  if (!item.is_active) throw new AppError('Item is not available', 400);
 
   const id = repo.createItemRequest(db, {
     user_id: userId,
@@ -392,9 +415,9 @@ export function getItemRequests(status?: string): DbItemRequest[] {
 export function approveItemRequest(id: number): void {
   const db = getDb();
   const request = repo.findItemRequestById(db, id);
-  if (!request) throw new AppError('请求不存在', 404);
+  if (!request) throw new AppError('Request not found', 404);
   if (request.status !== 'pending')
-    throw new AppError('只能批准待处理的请求', 400);
+    throw new AppError('Only pending requests can be approved', 400);
 
   repo.updateItemRequestStatus(db, id, 'approved');
 }
@@ -402,9 +425,9 @@ export function approveItemRequest(id: number): void {
 export function rejectItemRequest(id: number): void {
   const db = getDb();
   const request = repo.findItemRequestById(db, id);
-  if (!request) throw new AppError('请求不存在', 404);
+  if (!request) throw new AppError('Request not found', 404);
   if (request.status !== 'pending')
-    throw new AppError('只能拒绝待处理的请求', 400);
+    throw new AppError('Only pending requests can be rejected', 400);
 
   repo.updateItemRequestStatus(db, id, 'rejected');
 }
