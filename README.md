@@ -2,10 +2,7 @@
 
 Factorio 服务器管理面板，从 PHP 迁移到 Node.js/TypeScript + Fastify。
 
-## 与旧项目的关系
-- 旧项目：`../FactorioWeb/`（PHP）
-- 新项目：`../FactorioWebTS/`（TypeScript）
-- 通过绞杀者模式逐步替换 PHP API
+
 
 ## 技术栈
 - **运行时**: Node.js 22
