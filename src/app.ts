@@ -20,6 +20,7 @@ import logRoutes from './modules/log/log.routes.js';
 import versionRoutes from './modules/version/version.routes.js';
 import backupRoutes from './modules/backup/backup.routes.js';
 import { scheduler } from './lib/scheduler.js';
+import { commandQueue } from './lib/command-queue.js';
 import { initChatEventSubscriptions } from './modules/chat/chat.service.js';
 import { startLogWatcher, stopLogWatcher } from './lib/log-watcher.js';
 import { logReader } from './lib/log-reader.js';
@@ -88,10 +89,12 @@ export async function buildApp() {
   startLogWatcher();
   initChatEventSubscriptions();
   scheduler.start();
+  commandQueue.start();
   const logRotationTimer = startLogRotationCheck();
 
   process.on('SIGINT', () => {
     scheduler.stop();
+    commandQueue.stop();
     logReader.stop();
     stopLogWatcher();
     clearInterval(logRotationTimer);
@@ -99,6 +102,7 @@ export async function buildApp() {
   });
   process.on('SIGTERM', () => {
     scheduler.stop();
+    commandQueue.stop();
     logReader.stop();
     stopLogWatcher();
     clearInterval(logRotationTimer);

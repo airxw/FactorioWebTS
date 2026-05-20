@@ -118,6 +118,7 @@
 
     <div id="toast-container" class="toast-container"></div>
 
+    <script src="/js/websocket.js"></script>
     <script src="/js/token-manager.js"></script>
     <script src="/js/app.js"></script>
     <script src="/js/shared.js"></script>
@@ -136,6 +137,7 @@
         historyVisible: false,
         historyIdx: -1,
         pollTimer: null,
+        wsReady: false,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -145,6 +147,23 @@
           if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
           this.refreshStatus();
           this.pollTimer = setInterval(() => this.refreshStatus(), 10000);
+          this.initWebSocket();
+        },
+
+        initWebSocket() {
+          var self = this;
+          wsClient.on('open', function() {
+            self.wsReady = true;
+          });
+          wsClient.subscribe('console_response', function(data) {
+            if (data && data.lines && data.lines.length > 0) {
+              var prefix = data.command ? '[' + self.now() + '] [async] ' : '[' + self.now() + '] ';
+              for (var i = 0; i < data.lines.length; i++) {
+                self.addOutput(prefix + data.lines[i]);
+              }
+            }
+          });
+          wsClient.connect();
         },
 
         async refreshStatus() {

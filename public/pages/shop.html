@@ -165,13 +165,6 @@
             <div class="modal-header"><h3>确认订单</h3><button class="modal-close" @click="showCheckout = false">&times;</button></div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label class="form-label">领取方式</label>
-                    <div class="delivery-options">
-                        <label class="delivery-option"><input type="radio" value="direct" x-model="deliveryMode" checked><span>直接发送到游戏</span></label>
-                        <label class="delivery-option"><input type="radio" value="pickup" x-model="deliveryMode"><span>游戏内取货码</span></label>
-                    </div>
-                </div>
-                <div class="form-group">
                     <label class="form-label">游戏角色名</label>
                     <input type="text" class="form-control" x-model="playerName" placeholder="请输入游戏中你的角色名" required>
                 </div>
@@ -180,8 +173,20 @@
                     <div class="price-summary-row">商品数 <span x-text="cart.length"></span></div>
                 </div>
                 <div x-show="checkoutError" class="text-danger" style="margin-bottom:var(--spacing-md);font-size:var(--font-size-sm);" x-text="checkoutError"></div>
+                <div x-show="cdkResult" class="cdk-result-box" style="background:var(--color-success-bg,#d4edda);border:2px solid var(--color-success,#28a745);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md);text-align:center">
+                    <div style="font-weight:700;margin-bottom:4px">提货码已生成！</div>
+                    <div style="font-size:1.25rem;font-family:monospace;letter-spacing:2px" x-text="cdkResult"></div>
+                    <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:8px">在游戏聊天中输入 <code style="background:#333;color:#fff;padding:2px 6px;border-radius:3px">!claim <span x-text="cdkResult"></span></code> 即可提货</div>
+                </div>
+                <div x-show="cdkList.length > 0" class="cdk-result-box" style="background:var(--color-success-bg,#d4edda);border:2px solid var(--color-success,#28a745);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md)">
+                    <div style="font-weight:700;margin-bottom:8px">提货码已生成！共 <span x-text="cdkList.length"></span> 个：</div>
+                    <template x-for="code in cdkList">
+                        <div style="font-size:0.95rem;font-family:monospace;letter-spacing:2px;margin-bottom:4px" x-text="code"></div>
+                    </template>
+                    <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:8px">在游戏聊天中逐个输入 <code style="background:#333;color:#fff;padding:2px 6px;border-radius:3px">!claim &lt;提货码&gt;</code> 即可提货</div>
+                </div>
                 <button class="btn btn-primary w-100" @click="submitCheckout()" :disabled="submitting">
-                    <span x-show="!submitting">提交订单</span>
+                    <span x-show="!submitting">确认购买</span>
                     <span x-show="submitting">提交中...</span>
                 </button>
             </div>
@@ -250,9 +255,10 @@
         orderStatusFilter: '',
         vipLevels: [],
         showCheckout: false,
-        deliveryMode: 'direct',
         playerName: '',
         checkoutError: '',
+        cdkResult: '',
+        cdkList: [],
         submitting: false,
         syncing: false,
         showRequestModal: false,
@@ -370,6 +376,8 @@
           if (!this.playerName.trim()) { this.checkoutError = '请输入游戏角色名'; return; }
           this.submitting = true;
           this.checkoutError = '';
+          this.cdkResult = '';
+          this.cdkList = [];
 
           try {
             if (this.cart.length === 1) {
@@ -377,26 +385,29 @@
               var res = await fetch('/api/shop/orders', {
                 method: 'POST', headers: this.authHeaders('application/json'),
                 body: JSON.stringify({
-                  items: [{ item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality, player_name: this.playerName }],
-                  delivery_mode: this.deliveryMode
+                  item_id: ci.item.id,
+                  quantity: ci.quantity,
+                  quality_level: ci.quality,
+                  player_name: this.playerName
                 })
               });
               var data = await res.json();
               if (data.success) {
-                this.showToast('订单提交成功！订单号: ' + data.data.order_number, 'success');
-                this.showCheckout = false; this.cart = []; this.playerName = ''; this.loadOrders();
+                this.cdkResult = data.data.code;
+                this.cart = []; this.playerName = ''; this.loadOrders();
                 this.syncCart();
               } else { this.checkoutError = data.error || '提交失败'; }
             } else {
-              var items = this.cart.map(function(ci) { return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality, player_name: this.playerName }; });
+              var self = this;
+              var items = this.cart.map(function(ci) { return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality }; });
               var res = await fetch('/api/shop/orders/batch', {
                 method: 'POST', headers: this.authHeaders('application/json'),
-                body: JSON.stringify({ items: items, delivery_mode: this.deliveryMode })
+                body: JSON.stringify({ items: items, player_name: self.playerName })
               });
               var data = await res.json();
               if (data.success) {
-                this.showToast('批量订单提交成功！共 ' + data.data.item_count + ' 件商品', 'success');
-                this.showCheckout = false; this.cart = []; this.playerName = ''; this.loadOrders();
+                this.cdkList = data.data.codes;
+                this.cart = []; this.playerName = ''; this.loadOrders();
                 this.syncCart();
               } else { this.checkoutError = data.error || '提交失败'; }
             }

@@ -1,15 +1,17 @@
-import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, statSync, createReadStream } from 'node:fs';
+import { watch, type FSWatcher } from 'node:fs';
 import { eventBus } from './event-bus.js';
 import { logger } from './logger.js';
-import { LOG_POLL_INTERVAL } from '../config/constants.js';
 import { resolveLogPath } from './paths.js';
+import { executeClaimCode } from '../modules/cdk/cdk.service.js';
+import { fireAndForget } from './game-command-bus.js';
 
 export class LogReader {
   private logFilePath: string = '';
   private logPosition: number = 0;
-  private lastIno: number = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private watcher: FSWatcher | null = null;
   private running: boolean = false;
+  private readDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   get currentLogPath(): string {
     return this.logFilePath;
@@ -28,19 +30,22 @@ export class LogReader {
 
     if (existsSync(this.logFilePath)) {
       const stat = statSync(this.logFilePath);
-      this.lastIno = stat.ino;
       this.logPosition = stat.size;
-      this.timer = setInterval(() => this.checkLog(), LOG_POLL_INTERVAL);
-      logger.info({ logPath: this.logFilePath }, '日志读取服务已启动');
+      this.startWatching();
+      logger.info({ logPath: this.logFilePath }, '日志流式监听已启动');
     } else {
       logger.info('日志文件不存在，等待服务器启动后自动激活');
     }
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    if (this.readDebounceTimer) {
+      clearTimeout(this.readDebounceTimer);
+      this.readDebounceTimer = null;
+    }
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
     }
     this.running = false;
   }
@@ -50,55 +55,122 @@ export class LogReader {
 
     this.logFilePath = newLogPath;
     this.logPosition = 0;
-    this.lastIno = 0;
 
     if (existsSync(newLogPath)) {
       const stat = statSync(newLogPath);
-      this.lastIno = stat.ino;
       this.logPosition = stat.size;
     }
 
     this.running = true;
-    this.timer = setInterval(() => this.checkLog(), LOG_POLL_INTERVAL);
-    logger.info({ logPath: newLogPath }, '日志读取已切换');
+    this.startWatching();
+    logger.info({ logPath: newLogPath, startPos: this.logPosition }, '日志流式监听已切换');
   }
 
-  private checkLog(): void {
-    if (!this.logFilePath || !existsSync(this.logFilePath)) return;
+  private startWatching(): void {
+    if (!this.logFilePath) return;
 
-    try {
-      const st = statSync(this.logFilePath);
-
-      if (st.ino !== this.lastIno) {
-        this.logPosition = 0;
-        this.lastIno = st.ino;
-      }
-
-      if (st.size <= this.logPosition) {
-        this.logPosition = st.size;
+    const tryWatch = () => {
+      if (!this.logFilePath || !this.running) return;
+      if (!existsSync(this.logFilePath)) {
+        // 文件尚未创建，延迟重试
+        setTimeout(tryWatch, 1000);
         return;
       }
 
-      const bytesToRead = st.size - this.logPosition;
-      const buffer = Buffer.alloc(bytesToRead);
+      // 重连场景（如日志轮转后），从文件末尾开始，避免重读旧内容
+      this.logPosition = statSync(this.logFilePath).size;
 
-      let fd: number | undefined;
       try {
-        fd = openSync(this.logFilePath, 'r');
-        readSync(fd, buffer, 0, bytesToRead, this.logPosition);
-      } finally {
-        if (fd !== undefined) closeSync(fd);
+        this.watcher = watch(this.logFilePath, (eventType) => {
+          if (eventType === 'change') {
+            this.scheduleRead();
+          } else if (eventType === 'rename') {
+            // 文件被重命名（轮转），关闭旧 watcher，等待新文件出现
+            if (this.watcher) {
+              this.watcher.close();
+              this.watcher = null;
+            }
+            setTimeout(tryWatch, 500);
+          }
+        });
+
+        this.watcher.on('error', (err) => {
+          logger.warn({ err }, '[LogReader] 文件监听错误，将在 1 秒后重试');
+          if (this.watcher) {
+            this.watcher.close();
+            this.watcher = null;
+          }
+          setTimeout(tryWatch, 1000);
+        });
+      } catch (e) {
+        logger.warn({ err: e }, '[LogReader] 无法建立原生文件监听，将在 1 秒后重试');
+        setTimeout(tryWatch, 1000);
+      }
+    };
+
+    tryWatch();
+  }
+
+  private scheduleRead(): void {
+    // 防抖：合并短时间内多次 change 事件为一次读取
+    if (this.readDebounceTimer) {
+      clearTimeout(this.readDebounceTimer);
+    }
+    this.readDebounceTimer = setTimeout(() => {
+      this.readDebounceTimer = null;
+      this.readNewLines();
+    }, 50);
+  }
+
+  private readNewLines(): void {
+    if (!this.logFilePath || !existsSync(this.logFilePath)) return;
+
+    try {
+      const stat = statSync(this.logFilePath);
+
+      // 文件被截断（清空或变小），重置指针到 0 以读取新内容
+      if (stat.size < this.logPosition) {
+        this.logPosition = 0;
       }
 
-      this.logPosition = st.size;
+      if (stat.size <= this.logPosition) return;
 
-      const content = buffer.toString('utf-8');
-      const lines = content.split('\n').filter((l) => l.trim());
+      const startPos = this.logPosition;
+      const endPos = stat.size - 1;
 
-      for (const line of lines) {
-        this.processLine(line);
-      }
-    } catch (e) { logger.warn({ err: e }, '[LogReader] Failed to read log file'); }
+      // 使用 ReadStream 流式读取追加的内容，防止大文件 split 导致内存暴涨
+      const stream = createReadStream(this.logFilePath, {
+        start: startPos,
+        end: endPos,
+        encoding: 'utf-8',
+      });
+
+      let remainingText = '';
+
+      stream.on('data', (chunk: string) => {
+        const lines = (remainingText + chunk).split('\n');
+        // 最后一项可能是不完整的行，暂存到下一次
+        remainingText = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim()) this.processLine(line);
+        }
+      });
+
+      stream.on('end', () => {
+        if (remainingText.trim()) {
+          this.processLine(remainingText);
+        }
+        // 精准更新指针
+        this.logPosition = stat.size;
+      });
+
+      stream.on('error', (err) => {
+        logger.debug({ err }, '[LogReader] 读取追加日志流错误');
+      });
+    } catch (e) {
+      logger.debug({ err: e }, '[LogReader] 读取追加日志失败');
+    }
   }
 
   private processLine(line: string): void {
@@ -113,6 +185,12 @@ export class LogReader {
           raw: line,
           time,
         });
+        if (chatData.message.startsWith('!claim ') || chatData.message.startsWith('!提货 ')) {
+          const code = chatData.message.substring(chatData.message.indexOf(' ') + 1);
+          executeClaimCode(chatData.player, code);
+        } else if (chatData.message === '!claim' || chatData.message === '!提货') {
+          fireAndForget(`/w ${chatData.player} 用法: !claim <提货码>`);
+        }
       }
     } else if (line.includes('joined the game')) {
       const playerName = this.parsePlayerNameFromEvent(line);

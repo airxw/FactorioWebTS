@@ -290,7 +290,11 @@
               })
             });
             var data = await res.json();
-            this.showToast(data.success ? 'VIP设置成功' : (data.error || '设置失败'), data.success ? 'success' : 'error');
+            if (data.success && data.data.code) {
+              this.showToast('VIP提货码: ' + data.data.code + ' | 请在游戏内输入 !claim ' + data.data.code, 'success');
+            } else {
+              this.showToast(data.success ? 'VIP已移除' : (data.error || '设置失败'), data.success ? 'success' : 'error');
+            }
             if (data.success) { this.vipForm.username = ''; this.vipForm.vip_level = ''; this.vipForm.duration_days = 30; this.loadVipUsers(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
         },

@@ -2,12 +2,13 @@ import os from 'os';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getRconManager, closeRconManager, RconConnection, resolveRconSettings } from '../../lib/rcon.js';
-import { sendGameCommand } from '../../lib/game-command-bus.js';
+import { getRconManager, closeRconManager } from '../../lib/rcon.js';
+import { sendGameCommand, setServerRunningState } from '../../lib/game-command-bus.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../lib/logger.js';
 import { wsManager } from '../../plugins/websocket.js';
 import { resetLogWatcher } from '../../lib/log-watcher.js';
+import { eventBus } from '../../lib/event-bus.js';
 import {
   resolveLogPath,
   resolveConfigDir,
@@ -28,8 +29,9 @@ export type ServerStateValue = (typeof ServerState)[keyof typeof ServerState];
 
 const BLOCKED_COMMANDS = [/shutdown/i, /quit/i, /exit/i, /^lua\s*=/i];
 const MAX_COMMAND_LENGTH = 500;
-const RCON_DETECT_TIMEOUT_MS = 5000;
 const PROCESS_EXIT_TIMEOUT_MS = 20000;
+const RCON_STARTUP_RETRY_INTERVAL_MS = 2000;
+const RCON_STARTUP_MAX_RETRIES = 30;
 
 let state: ServerStateValue = ServerState.UNKNOWN;
 let serverProcess: ChildProcess | null = null;
@@ -42,6 +44,11 @@ let lastExitError = '';
 let currentSaveName = '';
 let currentConfigName = '';
 let stoppingRequestedAt = 0;
+let rconConnectTimer: NodeJS.Timeout | null = null;
+
+let cachedPlayers: string[] = [];
+let cachedPlayerCount = 0;
+let statusCacheTimer: NodeJS.Timeout | null = null;
 
 function setState(newState: ServerStateValue): void {
   const prev = state;
@@ -64,6 +71,17 @@ function setState(newState: ServerStateValue): void {
   state = newState;
   logger.info({ from: prev, to: newState }, '[Server] State changed');
   broadcastState();
+
+  setServerRunningState(
+    state === ServerState.RUNNING,
+    state === ServerState.STOPPING
+  );
+
+  if (state === ServerState.RUNNING) {
+    startStatusPoller();
+  } else {
+    stopStatusPoller();
+  }
 }
 
 function broadcastState(): void {
@@ -77,6 +95,114 @@ function broadcastState(): void {
     lastExitError,
     startTime: serverStartTime,
   }, true);
+}
+
+function startStatusPoller(): void {
+  if (statusCacheTimer) return;
+
+  const poll = async () => {
+    if (state !== ServerState.RUNNING) {
+      statusCacheTimer = setTimeout(poll, 3000);
+      return;
+    }
+
+    try {
+      const playersRes = await sendGameCommand('/players');
+      if (!playersRes.ok) {
+        if (playersRes.error.code === 'NOT_CONNECTED' || playersRes.error.code === 'DISCONNECTED') {
+          logger.warn({ error: playersRes.error }, '[Server] RCON heartbeat failed, reconnecting...');
+          getRconManager().connect().catch((e) => {
+            logger.warn({ err: e }, '[Server] RconManager reconnect failed');
+          });
+        }
+      } else if (playersRes.value) {
+        const players: string[] = [];
+        for (const m of playersRes.value.matchAll(/(\S+)\s+\(online\)/gi)) {
+          players.push(m[1]);
+        }
+        cachedPlayers = players;
+        cachedPlayerCount = players.length;
+      }
+    } catch (e) {
+      logger.debug('[RCON Cache] Failed to background poll players');
+    }
+
+    // 使用递归 setTimeout 而非 setInterval，确保上一次完成后才开始下一次，避免 RCON 超时时请求堆积
+    if (state === ServerState.RUNNING) {
+      statusCacheTimer = setTimeout(poll, 3000);
+    }
+  };
+
+  statusCacheTimer = setTimeout(poll, 3000);
+}
+
+function stopStatusPoller(): void {
+  if (statusCacheTimer) {
+    clearTimeout(statusCacheTimer);
+    statusCacheTimer = null;
+  }
+  cachedPlayers = [];
+  cachedPlayerCount = 0;
+}
+
+function cancelRconConnectRetry(): void {
+  if (rconConnectTimer) {
+    clearTimeout(rconConnectTimer);
+    rconConnectTimer = null;
+  }
+}
+
+function scheduleRconConnectForStartup(): void {
+  cancelRconConnectRetry();
+  let attempts = 0;
+
+  const tryConnect = () => {
+    // 状态已不是 STARTING，停止重试
+    if (state !== ServerState.STARTING) return;
+
+    // 进程已退出，停止重试
+    if (serverProcess && serverProcess.exitCode !== null) {
+      logger.warn('[Server] Factorio process exited during RCON retry, stopping');
+      return;
+    }
+
+    attempts++;
+    getRconManager().connect().then((res) => {
+      if (res.ok) {
+        // 连接成功后尝试获取版本号
+        sendGameCommand('/version').then((verRes) => {
+          if (verRes.ok) {
+            const versionMatch = verRes.value.match(/Version:\s*([\d.]+)/i);
+            if (versionMatch) serverVersion = versionMatch[1];
+          }
+        }).catch(() => {});
+        setState(ServerState.RUNNING);
+        return;
+      }
+
+      if (attempts >= RCON_STARTUP_MAX_RETRIES) {
+        logger.error({ attempts }, '[Server] RCON 连接重试已达上限，启动失败');
+        lastExitError = `RCON 连接失败，已重试 ${attempts} 次`;
+        setState(ServerState.ERROR);
+        return;
+      }
+
+      logger.info({ attempt: attempts, max: RCON_STARTUP_MAX_RETRIES }, '[Server] RCON 未就绪，2秒后重试');
+      rconConnectTimer = setTimeout(tryConnect, RCON_STARTUP_RETRY_INTERVAL_MS);
+    }).catch(() => {
+      if (attempts >= RCON_STARTUP_MAX_RETRIES) {
+        logger.error({ attempts }, '[Server] RCON 连接重试已达上限，启动失败');
+        lastExitError = `RCON 连接失败，已重试 ${attempts} 次`;
+        setState(ServerState.ERROR);
+        return;
+      }
+
+      rconConnectTimer = setTimeout(tryConnect, RCON_STARTUP_RETRY_INTERVAL_MS);
+    });
+  };
+
+  // 首次延迟 1 秒，给 Factorio 进程一点启动时间
+  rconConnectTimer = setTimeout(tryConnect, 1000);
 }
 
 export function getServerState(): {
@@ -179,6 +305,7 @@ function attachProcessListeners(child: ChildProcess): void {
   });
 
   child.on('exit', (code: number | null, signal: string | null) => {
+    cancelRconConnectRetry();
     lastExitCode = code;
     lastExitSignal = signal;
     if (code !== 0 && stoppingRequestedAt === 0) {
@@ -206,66 +333,6 @@ function attachProcessListeners(child: ChildProcess): void {
   });
 }
 
-async function waitForRconReady(settings: { host: string; port: number; password: string }, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const conn = new RconConnection(settings.host, settings.port, settings.password, 2000, 5000);
-      const result = await conn.connect();
-      conn.disconnect();
-      if (result.ok && result.value) {
-        return true;
-      }
-      if (!result.ok && result.error.code === 'AUTHENTICATION_FAILED') {
-        return false;
-      }
-    } catch {}
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  return false;
-}
-
-function scheduleRconRetry(settings: { host: string; port: number; password: string }, initialDelayMs = 0): void {
-  const maxRetries = 20;
-  let attempts = 0;
-
-  const tryConnect = async () => {
-    if (state !== ServerState.STARTING) return;
-    attempts++;
-    try {
-      const conn = new RconConnection(settings.host, settings.port, settings.password, 2000, 5000);
-      const result = await conn.connect();
-      conn.disconnect();
-      if (result.ok && result.value) {
-        setState(ServerState.RUNNING);
-        getRconManager().connect().catch((e) => {
-          logger.warn({ err: e }, '[Server] RconManager connect failed after RCON ready');
-        });
-        return;
-      }
-      if (!result.ok && result.error.code === 'AUTHENTICATION_FAILED') {
-        setState(ServerState.ERROR);
-        return;
-      }
-    } catch (e) {
-      logger.debug({ err: e, attempt: attempts }, '[Server] RCON retry connect error');
-    }
-    if (attempts < maxRetries && state === ServerState.STARTING) {
-      setTimeout(tryConnect, 5000);
-    } else if (attempts >= maxRetries) {
-      logger.warn({ attempts }, '[Server] RCON retry exhausted, transitioning to ERROR');
-      setState(ServerState.ERROR);
-      if (serverProcess && serverProcess.exitCode === null) {
-        serverProcess.kill('SIGTERM');
-      } else {
-        killAllFactorioProcesses();
-      }
-    }
-  };
-
-  setTimeout(tryConnect, initialDelayMs);
-}
-
 async function tryDetectRunning(): Promise<void> {
   const result = await sendGameCommand('/version');
   if (result.ok && result.value.length > 0 && !result.value.toLowerCase().includes('error')) {
@@ -279,15 +346,19 @@ async function tryDetectRunning(): Promise<void> {
   const pid = findFactorioPid();
   if (pid) {
     setState(ServerState.STARTING);
-    const rconSettings = resolveRconSettings();
-    const ready = await waitForRconReady(rconSettings, RCON_DETECT_TIMEOUT_MS);
-    if (ready) {
-      setState(ServerState.RUNNING);
-      return;
-    }
-    logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
-    try { process.kill(pid, 'SIGTERM'); } catch {}
-    setState(ServerState.OFF);
+    getRconManager().connect().then((res) => {
+      if (res.ok) {
+        setState(ServerState.RUNNING);
+      } else {
+        logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
+        try { process.kill(pid, 'SIGTERM'); } catch {}
+        setState(ServerState.OFF);
+      }
+    }).catch(() => {
+      logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
+      try { process.kill(pid, 'SIGTERM'); } catch {}
+      setState(ServerState.OFF);
+    });
     return;
   }
 
@@ -331,34 +402,15 @@ export async function getStatus(): Promise<{
 
   const running = state === ServerState.RUNNING;
   const procInfo = getServerProcessInfo();
-  const players: string[] = [];
-  let playerCount = 0;
-  let version = serverVersion || 'unknown';
-
-  if (running) {
-    const versionRes = await sendGameCommand('/version');
-    if (versionRes.ok) {
-      const versionMatch = versionRes.value.match(/Version:\s*([\d.]+)/i);
-      if (versionMatch) version = versionMatch[1];
-    }
-
-    const playersRes = await sendGameCommand('/players');
-    if (playersRes.ok && playersRes.value) {
-      for (const m of playersRes.value.matchAll(/(\S+)\s+\(online\)/gi)) {
-        players.push(m[1]);
-      }
-      playerCount = players.length;
-    }
-  }
 
   const uptime = procInfo.startTime > 0 ? Math.floor((Date.now() - procInfo.startTime) / 1000) : 0;
 
   return {
     running,
     state,
-    version,
-    players,
-    playerCount,
+    version: serverVersion || 'unknown',
+    players: cachedPlayers,
+    playerCount: cachedPlayerCount,
     pid: procInfo.pid,
     uptime,
     logPath: procInfo.logPath || serverLogPath,
@@ -393,14 +445,17 @@ export async function startServer(
   if (orphan) {
     serverStartTime = serverStartTime || Date.now();
     setState(ServerState.STARTING);
-    const rconSettings = resolveRconSettings();
-    const ready = await waitForRconReady(rconSettings, RCON_DETECT_TIMEOUT_MS);
-    if (ready) {
-      setState(ServerState.RUNNING);
-      return { message: 'Server is already running (detected existing process)' };
-    }
-    setState(ServerState.ERROR);
-    return { message: 'Detected orphan process but RCON unreachable, please stop first' };
+    getRconManager().connect().then((res) => {
+      if (res.ok) {
+        setState(ServerState.RUNNING);
+        return { message: 'Server is already running (detected existing process)' };
+      }
+      setState(ServerState.ERROR);
+      return { message: 'Detected orphan process but RCON unreachable, please stop first' };
+    }).catch(() => {
+      setState(ServerState.ERROR);
+      return { message: 'Detected orphan process but RCON unreachable, please stop first' };
+    });
   }
 
   currentSaveName = map || '';
@@ -462,14 +517,11 @@ export async function startServer(
 
     serverProcess = child;
     attachProcessListeners(child);
-
     resetLogWatcher(logPath);
 
-    closeRconManager();
+    scheduleRconConnectForStartup();
 
-    scheduleRconRetry({ host: '127.0.0.1', port: rconPort, password: rconPassword }, 5000);
-
-    logger.info({ binPath, args, cwd: rootDir, rconPort }, 'Factorio process spawned, RCON detection started');
+    logger.info({ binPath, rconPort }, 'Factorio process spawned, RCON manager connecting...');
     return { message: 'Server process spawned, waiting for startup...' };
   } catch (e) {
     if (e instanceof AppError && e.statusCode === 400) {
@@ -492,6 +544,7 @@ export async function stopServer(): Promise<{ message: string }> {
   }
 
   stoppingRequestedAt = Date.now();
+  cancelRconConnectRetry();
   setState(ServerState.STOPPING);
 
   let graceful = false;
@@ -499,6 +552,7 @@ export async function stopServer(): Promise<{ message: string }> {
   try {
     await sendGameCommand('/server-save');
     logger.info('Server save completed');
+    await new Promise((r) => setTimeout(r, 3000));
     await sendGameCommand('/quit');
     logger.info('Quit command sent via RCON, waiting for process to exit');
     graceful = true;
@@ -587,9 +641,54 @@ export async function saveGame(): Promise<{ message: string }> {
   return { message: 'Save command sent' };
 }
 
+const CONSOLE_LOG_CAPTURE_WINDOW_MS = 5000;
+
+let consoleCaptureTimer: NodeJS.Timeout | null = null;
+let consoleCaptureHandler: ((payload: { message: string; raw: string; time: string }) => void) | null = null;
+
+function startConsoleLogCapture(command: string): void {
+  stopConsoleLogCapture();
+
+  const capturedLines: string[] = [];
+
+  consoleCaptureHandler = (payload) => {
+    capturedLines.push(payload.message || payload.raw || '');
+  };
+
+  eventBus.on('log:system', consoleCaptureHandler);
+
+  consoleCaptureTimer = setTimeout(() => {
+    if (consoleCaptureHandler) {
+      eventBus.off('log:system', consoleCaptureHandler);
+      consoleCaptureHandler = null;
+    }
+    consoleCaptureTimer = null;
+
+    if (capturedLines.length > 0) {
+      wsManager.broadcast('console_response', {
+        command,
+        lines: capturedLines,
+        captured: true,
+      });
+    }
+  }, CONSOLE_LOG_CAPTURE_WINDOW_MS);
+}
+
+function stopConsoleLogCapture(): void {
+  if (consoleCaptureTimer) {
+    clearTimeout(consoleCaptureTimer);
+    consoleCaptureTimer = null;
+  }
+  if (consoleCaptureHandler) {
+    eventBus.off('log:system', consoleCaptureHandler);
+    consoleCaptureHandler = null;
+  }
+}
+
 export async function sendConsole(command: string): Promise<string> {
   validateCommand(command);
   const result = await sendGameCommand(command);
+  startConsoleLogCapture(command);
   return result.ok ? result.value : '';
 }
 
@@ -627,16 +726,7 @@ export async function getSystemStats(): Promise<{
     diskPercent = 0;
   }
 
-  let onlinePlayers = 0;
-  try {
-    const result = await sendGameCommand('/players');
-    if (result.ok && result.value) {
-      const playerMatches = result.value.matchAll(/(\S+)\s+\(online\)/gi);
-      onlinePlayers = [...playerMatches].length;
-    }
-  } catch {
-    onlinePlayers = 0;
-  }
+  let onlinePlayers = cachedPlayerCount;
 
   return { cpu_percent: cpuPercent, memory_percent: memoryPercent, disk_percent: diskPercent, online_players: onlinePlayers };
 }

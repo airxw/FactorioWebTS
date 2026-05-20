@@ -5,7 +5,12 @@ export type RconErrorCode =
   | 'READ_TIMEOUT'
   | 'NOT_CONNECTED'
   | 'PARSE_ERROR'
-  | 'DISCONNECTED';
+  | 'DISCONNECTED'
+  | 'STATE_BLOCKED'
+  | 'QUEUE_FAILED'
+  | 'DISCARDED'
+  | 'NOT_FOUND'
+  | 'TIMEOUT';
 
 export class RconError extends Error {
   public readonly code: RconErrorCode;

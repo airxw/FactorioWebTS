@@ -1,6 +1,7 @@
 import { getDb } from '../../lib/database.js';
 import * as repo from './vip.repository.js';
 import * as authRepo from '../auth/auth.repository.js';
+import { createVipCdk } from '../cdk/cdk.service.js';
 import type { DbVipLevel } from './vip.repository.js';
 import type {
   CreateVipLevelInput,
@@ -66,7 +67,7 @@ export function deleteLevel(id: number): void {
   repo.deleteLevel(db, id);
 }
 
-export function setUserVip(data: SetUserVipInput): { user_id: number; username: string; vip_level: number; expiry: number } {
+export function setUserVip(data: SetUserVipInput): { code: string; username: string; vip_level: number; expiry: number } {
   const db = getDb();
 
   const user = authRepo.findUserByUsername(db, data.username);
@@ -74,7 +75,7 @@ export function setUserVip(data: SetUserVipInput): { user_id: number; username: 
 
   if (data.vip_level === 0) {
     repo.setUserVip(db, user.id, 0, 0);
-    return { user_id: user.id, username: user.username, vip_level: 0, expiry: 0 };
+    return { code: '', username: user.username, vip_level: 0, expiry: 0 };
   }
 
   const level = repo.findLevelByLevel(db, data.vip_level);
@@ -91,9 +92,9 @@ export function setUserVip(data: SetUserVipInput): { user_id: number; username: 
     expiry = now + days * 86400;
   }
 
-  repo.setUserVip(db, user.id, data.vip_level, expiry);
+  const code = createVipCdk(data.username, data.vip_level, days);
 
-  return { user_id: user.id, username: user.username, vip_level: data.vip_level, expiry };
+  return { code, username: user.username, vip_level: data.vip_level, expiry };
 }
 
 export function getVipUsers(): Array<{

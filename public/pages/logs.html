@@ -194,14 +194,43 @@
     <script src="/js/app.js"></script>
 
     <script>
-        let currentLogs = [];
-        let filteredLogs = [];
+        // ========== 常量配置 ==========
+        const MAX_DOM_NODES = 500;          // DOM 中最大保留节点数
+        const MAX_MEMORY_LOGS = 5000;       // 内存中最大保留日志条数
+        const PAGE_SIZE = 200;              // 每页拉取条数（降低单次压力）
+        const SCROLL_LOAD_THRESHOLD = 200;  // 滚动到底部多少像素时触发加载下一页
+        const SCROLL_DEBOUNCE_MS = 100;     // 滚动事件防抖间隔
+        const REGEX_TIMEOUT_MS = 1000;      // 正则匹配超时保护（用于提示）
+        const REGEX_MAX_LENGTH = 200;       // 正则表达式最大长度限制
+
+        // ========== 全局状态 ==========
+        let currentLogs = [];               // 内存中的日志数据（有上限）
+        let filteredLogs = [];              // 过滤后的日志
         let currentCategory = 'all';
         let currentTimeRange = '24h';
         let autoScrollEnabled = true;
         let userScrolledUp = false;
         let searchTimer = null;
 
+        // 分页状态
+        let pagination = {
+            currentPage: 1,
+            totalPages: 1,
+            total: 0,
+            isLoading: false,
+            hasMore: true,
+            lastLogTime: null               // 最后一条日志的时间戳，用于去重衔接
+        };
+
+        // WebSocket 连接状态
+        let wsConnected = false;
+        let wsBuffer = [];                  // WS 缓冲区：loadLogs 期间暂存实时日志
+
+        // 滚动防抖
+        let scrollDebounceTimer = null;
+        let isProgrammaticScroll = false;   // 标记程序触发的滚动，避免误判
+
+        // ========== 初始化 ==========
         document.addEventListener('DOMContentLoaded', function() {
             checkSession({
                 requireAuth: true,
@@ -214,73 +243,57 @@
                         return;
                     }
                     SidebarMenu.initSidebarWithPermission();
-                    loadLogs();
                     setupScrollDetection();
-                    connectWebSocket();
+                    // 关键修复：先加载历史日志，完成后再连接 WebSocket
+                    loadLogs().then(function() {
+                        connectWebSocket();
+                    });
                 }
             });
         });
 
+        // ========== 日志加载（单页 + 懒加载） ==========
         async function loadLogs() {
-            const logContent = document.getElementById('log-content');
+            var logContent = document.getElementById('log-content');
             logContent.innerHTML = '<div class="loading-state"><div class="spinner-border" role="status"></div><p>正在加载日志，请稍候...</p></div>';
 
+            // 重置分页状态
+            pagination.currentPage = 1;
+            pagination.hasMore = true;
+            pagination.isLoading = false;
+            pagination.lastLogTime = null;
+            currentLogs = [];
+            filteredLogs = [];
+            wsBuffer = [];
+
             try {
-                const baseParams = new URLSearchParams();
-                baseParams.set('page_size', '2000');
+                var params = buildQueryParams();
+                params.set('page_size', String(PAGE_SIZE));
 
-                if (currentCategory !== 'all') {
-                    baseParams.set('type', currentCategory);
-                }
-
-                const levelFilter = document.getElementById('level-filter').value;
-                if (levelFilter) {
-                    baseParams.set('level', levelFilter);
-                }
-
-                if (currentTimeRange !== 'all') {
-                    const now = new Date();
-                    baseParams.set('end_date', now.toISOString());
-                    const rangeMap = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 };
-                    baseParams.set('start_date', new Date(now.getTime() - rangeMap[currentTimeRange]).toISOString());
-                }
-
-                const response = await fetchAPI('/api/logs?' + baseParams.toString());
-                const data = await response.json();
+                var response = await fetchAPI('/api/logs?' + params.toString());
+                var data = await response.json();
 
                 if (data.success && data.data) {
-                    var firstPageLogs = Array.isArray(data.data) ? data.data : (data.data.logs || []);
-                    var total = data.data.total || firstPageLogs.length;
-                    var pageSize = data.data.page_size || 2000;
+                    var logs = data.data.logs || [];
+                    var total = data.data.total || 0;
+                    var pageSize = data.data.page_size || PAGE_SIZE;
 
-                    currentLogs = firstPageLogs;
+                    currentLogs = logs;
+                    pagination.total = total;
+                    pagination.totalPages = Math.ceil(total / pageSize);
+                    pagination.currentPage = data.data.page || 1;
+                    pagination.hasMore = pagination.currentPage < pagination.totalPages;
 
-                    if (total > firstPageLogs.length && data.data.page !== undefined) {
-                        var totalPages = Math.ceil(total / pageSize);
-                        var promises = [];
-                        for (var p = 2; p <= totalPages; p++) {
-                            var pageParams = new URLSearchParams(baseParams);
-                            pageParams.set('page', String(p));
-                            promises.push(
-                                fetchAPI('/api/logs?' + pageParams.toString())
-                                    .then(function(r) { return r.json(); })
-                                    .then(function(d) {
-                                        if (d.success && d.data) {
-                                            return Array.isArray(d.data) ? d.data : (d.data.logs || []);
-                                        }
-                                        return [];
-                                    })
-                                    .catch(function() { return []; })
-                            );
-                        }
-                        var extraPages = await Promise.all(promises);
-                        extraPages.forEach(function(pageLogs) {
-                            currentLogs = currentLogs.concat(pageLogs);
-                        });
+                    // 记录最后一条日志的时间，用于与 WS 数据去重衔接
+                    if (currentLogs.length > 0) {
+                        pagination.lastLogTime = currentLogs[currentLogs.length - 1].time || null;
                     }
 
+                    // 合并 WS 缓冲区中在历史数据之后的新日志
+                    flushWsBuffer();
+
                     applyFilters();
-                    showToast('成功加载 ' + currentLogs.length + ' 条日志', 'success');
+                    showToast('已加载 ' + currentLogs.length + ' 条日志' + (pagination.hasMore ? '（滚动到底部加载更多）' : ''), 'success');
                 } else {
                     logContent.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无日志数据</p></div>';
                     currentLogs = [];
@@ -293,12 +306,89 @@
             }
         }
 
+        // 构建查询参数
+        function buildQueryParams() {
+            var params = new URLSearchParams();
+
+            if (currentCategory !== 'all') {
+                params.set('type', currentCategory);
+            }
+
+            var levelFilter = document.getElementById('level-filter').value;
+            if (levelFilter) {
+                params.set('level', levelFilter);
+            }
+
+            if (currentTimeRange !== 'all') {
+                var now = new Date();
+                params.set('end_date', now.toISOString());
+                var rangeMap = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 };
+                params.set('start_date', new Date(now.getTime() - rangeMap[currentTimeRange]).toISOString());
+            }
+
+            return params;
+        }
+
+        // 滚动到底部时懒加载下一页
+        async function loadNextPage() {
+            if (pagination.isLoading || !pagination.hasMore) return;
+
+            pagination.isLoading = true;
+
+            try {
+                var params = buildQueryParams();
+                params.set('page_size', String(PAGE_SIZE));
+                params.set('page', String(pagination.currentPage + 1));
+
+                var response = await fetchAPI('/api/logs?' + params.toString());
+                var data = await response.json();
+
+                if (data.success && data.data) {
+                    var logs = data.data.logs || [];
+
+                    // 去重：基于时间戳+消息内容，防止分页偏移导致的数据重叠
+                    var existingKeys = new Set(currentLogs.map(function(e) {
+                        return (e.time || '') + '|' + (e.message || '');
+                    }));
+
+                    var newLogs = logs.filter(function(e) {
+                        return !existingKeys.has((e.time || '') + '|' + (e.message || ''));
+                    });
+
+                    currentLogs = currentLogs.concat(newLogs);
+                    pagination.currentPage = data.data.page || pagination.currentPage + 1;
+                    pagination.hasMore = pagination.currentPage < pagination.totalPages;
+
+                    // 更新最后日志时间
+                    if (currentLogs.length > 0) {
+                        pagination.lastLogTime = currentLogs[currentLogs.length - 1].time || null;
+                    }
+
+                    // 合并 WS 缓冲区
+                    flushWsBuffer();
+
+                    // 裁切内存
+                    trimMemoryLogs();
+
+                    applyFilters();
+                }
+            } catch (err) {
+                console.error('加载下一页失败', err);
+                showToast('加载更多日志失败', 'error');
+            } finally {
+                pagination.isLoading = false;
+            }
+        }
+
+        // 刷新日志（重置加载）
         function refreshLogs() {
             loadLogs();
         }
 
+        // ========== WebSocket 连接 ==========
         function connectWebSocket() {
             wsClient.on('open', function() {
+                wsConnected = true;
                 updateWsStatus('connected', '已连接');
                 showToast('实时日志连接成功', 'success');
             });
@@ -310,10 +400,12 @@
             });
 
             wsClient.on('close', function() {
+                wsConnected = false;
                 updateWsStatus('disconnected', '连接已断开');
             });
 
             wsClient.on('error', function(error) {
+                wsConnected = false;
                 updateWsStatus('disconnected', '连接错误');
             });
 
@@ -322,14 +414,35 @@
         }
 
         function updateWsStatus(state, text) {
-            const dot = document.getElementById('ws-dot');
-            const txt = document.getElementById('ws-text');
+            var dot = document.getElementById('ws-dot');
+            var txt = document.getElementById('ws-text');
             if (dot && txt) {
                 dot.className = 'ws-dot ' + state;
                 txt.textContent = text;
             }
         }
 
+        // ========== WS 缓冲区：解决历史加载与实时推送的时序冲突 ==========
+        function flushWsBuffer() {
+            if (wsBuffer.length === 0) return;
+
+            // 只追加时间在 lastLogTime 之后的日志，避免重复
+            var added = 0;
+            wsBuffer.forEach(function(entry) {
+                if (!pagination.lastLogTime || entry.time > pagination.lastLogTime) {
+                    currentLogs.push(entry);
+                    added++;
+                }
+            });
+
+            wsBuffer = [];
+
+            if (added > 0) {
+                trimMemoryLogs();
+            }
+        }
+
+        // ========== 实时日志追加 ==========
         function appendLogEntry(entry) {
             if (!entry) return;
 
@@ -338,12 +451,36 @@
             entry.level = entry.level || 'INFO';
             entry.message = entry.message || entry.msg || entry.content || '';
 
+            // 如果历史数据还在加载中，暂存到缓冲区
+            if (pagination.isLoading) {
+                wsBuffer.push(entry);
+                return;
+            }
+
+            // 去重检查：与最后一条日志比较
+            if (currentLogs.length > 0) {
+                var last = currentLogs[currentLogs.length - 1];
+                if (last.time === entry.time && last.message === entry.message) {
+                    return; // 重复，跳过
+                }
+            }
+
             currentLogs.push(entry);
 
+            // 更新分页锚点时间
+            pagination.lastLogTime = entry.time;
+
+            // 裁切内存
+            trimMemoryLogs();
+
+            // 如果当前过滤条件下该条目可见，追加到 DOM
             if (shouldShowEntry(entry)) {
-                const logContent = document.getElementById('log-content');
-                const el = createLogElement(entry, true);
+                var logContent = document.getElementById('log-content');
+                var el = createLogElement(entry, true);
                 logContent.appendChild(el);
+
+                // DOM 裁切：移除超出的旧节点
+                trimDomNodes();
 
                 if (autoScrollEnabled && !userScrolledUp) {
                     scrollToBottomImmediate();
@@ -353,20 +490,35 @@
 
         function shouldShowEntry(entry) {
             if (currentCategory !== 'all' && entry.type !== currentCategory) return false;
-            const levelOrder = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
-            const minLevel = document.getElementById('level-filter').value;
+            var levelOrder = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+            var minLevel = document.getElementById('level-filter').value;
             if (minLevel && (levelOrder[entry.level] || 0) < (levelOrder[minLevel] || 0)) return false;
             return true;
         }
 
-        function createLogElement(entry, isNew = false) {
-            const div = document.createElement('div');
+        // ========== DOM 与内存裁切保护 ==========
+        function trimDomNodes() {
+            var logContent = document.getElementById('log-content');
+            while (logContent.childElementCount > MAX_DOM_NODES) {
+                logContent.removeChild(logContent.firstChild);
+            }
+        }
+
+        function trimMemoryLogs() {
+            if (currentLogs.length > MAX_MEMORY_LOGS) {
+                currentLogs = currentLogs.slice(currentLogs.length - MAX_MEMORY_LOGS);
+            }
+        }
+
+        // ========== 日志元素创建 ==========
+        function createLogElement(entry, isNew) {
+            var div = document.createElement('div');
             div.className = 'log-entry ' + (entry.type || 'info') + (isNew ? ' new-entry' : '');
             div.dataset.type = entry.type || 'info';
 
-            let message = escapeHtml(entry.message || '');
+            var message = escapeHtml(entry.message || '');
 
-            const searchVal = document.getElementById('search-input').value.trim();
+            var searchVal = document.getElementById('search-input').value.trim();
             if (searchVal) {
                 message = highlightText(message, searchVal);
             }
@@ -379,8 +531,9 @@
             return div;
         }
 
+        // ========== 渲染日志列表（带 DOM 裁切） ==========
         function renderLogList() {
-            const logContent = document.getElementById('log-content');
+            var logContent = document.getElementById('log-content');
 
             if (filteredLogs.length === 0) {
                 logContent.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无符合条件的日志</p></div>';
@@ -388,20 +541,32 @@
             }
 
             logContent.innerHTML = '';
-            filteredLogs.forEach(function(entry) {
-                logContent.appendChild(createLogElement(entry));
-            });
+
+            // 只渲染最新的 MAX_DOM_NODES 条，避免 DOM 爆炸
+            var startIdx = Math.max(0, filteredLogs.length - MAX_DOM_NODES);
+            for (var i = startIdx; i < filteredLogs.length; i++) {
+                logContent.appendChild(createLogElement(filteredLogs[i], false));
+            }
+
+            // 如果有更多数据未显示，在顶部添加提示
+            if (startIdx > 0) {
+                var hint = document.createElement('div');
+                hint.className = 'log-entry load-more-hint';
+                hint.innerHTML = '<span class="log-msg" style="color: var(--gray-color); font-style: italic;">... 前方还有 ' + startIdx + ' 条日志，请缩小搜索范围查看 ...</span>';
+                logContent.insertBefore(hint, logContent.firstChild);
+            }
 
             if (autoScrollEnabled && !userScrolledUp) {
                 scrollToBottomImmediate();
             }
         }
 
+        // ========== 分类与时间范围切换 ==========
         function switchCategory(type, btn) {
             currentCategory = type;
             document.querySelectorAll('.cat-tab').forEach(function(t) { t.classList.remove('active'); });
             btn.classList.add('active');
-            applyFilters();
+            loadLogs();
         }
 
         function setTimeRange(range, btn) {
@@ -411,36 +576,52 @@
             loadLogs();
         }
 
+        // ========== 过滤逻辑（含正则安全保护） ==========
         function applyFilters() {
-            let result = [...currentLogs];
+            var result = currentLogs.slice();
 
             if (currentCategory !== 'all') {
                 result = result.filter(function(e) { return e.type === currentCategory; });
             }
 
-            const levelVal = document.getElementById('level-filter').value;
+            var levelVal = document.getElementById('level-filter').value;
             if (levelVal) {
-                const order = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
-                const minLv = order[levelVal] || 0;
+                var order = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+                var minLv = order[levelVal] || 0;
                 result = result.filter(function(e) { return (order[e.level] || 0) >= minLv; });
             }
 
-            const searchVal = document.getElementById('search-input').value.trim();
+            var searchVal = document.getElementById('search-input').value.trim();
             if (searchVal) {
-                const isRegex = document.getElementById('regex-mode').checked;
-                const isCaseSensitive = document.getElementById('case-sensitive').checked;
+                var isRegex = document.getElementById('regex-mode').checked;
+                var isCaseSensitive = document.getElementById('case-sensitive').checked;
+
+                // 正则安全保护
+                if (isRegex) {
+                    if (searchVal.length > REGEX_MAX_LENGTH) {
+                        showToast('正则表达式过长（最大 ' + REGEX_MAX_LENGTH + ' 字符）', 'warning');
+                        filteredLogs = [];
+                        renderLogList();
+                        return;
+                    }
+                    var testRegex = safeRegex(searchVal, isCaseSensitive);
+                    if (!testRegex) {
+                        showToast('正则表达式语法错误，请检查输入', 'warning');
+                        filteredLogs = [];
+                        renderLogList();
+                        return;
+                    }
+                }
+
                 result = result.filter(function(e) {
-                    const text = (e.message || '') + ' ' + (e.time || '');
-                    const target = isCaseSensitive ? text : text.toLowerCase();
-                    const query = isCaseSensitive ? searchVal : searchVal.toLowerCase();
+                    var text = (e.message || '') + ' ' + (e.time || '');
+                    var target = isCaseSensitive ? text : text.toLowerCase();
+                    var query = isCaseSensitive ? searchVal : searchVal.toLowerCase();
 
                     if (isRegex) {
-                        try {
-                            const flags = isCaseSensitive ? 'g' : 'gi';
-                            return new RegExp(searchVal, flags).test(text);
-                        } catch (err) {
-                            return false;
-                        }
+                        var regex = safeRegex(searchVal, isCaseSensitive);
+                        if (!regex) return false;
+                        return regex.test(text);
                     }
                     return target.includes(query);
                 });
@@ -450,33 +631,59 @@
             renderLogList();
         }
 
+        // 安全的正则表达式创建（防 ReDoS）
+        function safeRegex(pattern, isCaseSensitive) {
+            try {
+                var flags = isCaseSensitive ? 'g' : 'gi';
+                // 检测潜在的危险模式：重复量词嵌套
+                if (/(\+|\*){2,}|(\+\+|\*\*)/.test(pattern)) {
+                    return null;
+                }
+                var regex = new RegExp(pattern, flags);
+                // 简单的长度合理性检查
+                if (pattern.length > REGEX_MAX_LENGTH) {
+                    return null;
+                }
+                return regex;
+            } catch (e) {
+                return null;
+            }
+        }
+
         function debounceSearch() {
             if (searchTimer) clearTimeout(searchTimer);
             searchTimer = setTimeout(applyFilters, 300);
         }
 
         function highlightText(text, keyword) {
-            const isRegex = document.getElementById('regex-mode').checked;
-            const isCaseSensitive = document.getElementById('case-sensitive').checked;
+            var isRegex = document.getElementById('regex-mode').checked;
+            var isCaseSensitive = document.getElementById('case-sensitive').checked;
 
             try {
-                let flags = 'g';
+                var flags = 'g';
                 if (!isCaseSensitive) flags += 'i';
-                const regex = isRegex ? new RegExp(keyword, flags) : new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+                var regex;
+                if (isRegex) {
+                    regex = safeRegex(keyword, isCaseSensitive);
+                    if (!regex) return text;
+                } else {
+                    regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+                }
                 return text.replace(regex, '<mark>$&</mark>');
             } catch (e) {
                 return text;
             }
         }
 
+        // ========== 自动滚动 ==========
         function toggleAutoScroll() {
             autoScrollEnabled = !autoScrollEnabled;
-            const btn = document.getElementById('btn-autoscroll');
+            var btn = document.getElementById('btn-autoscroll');
             if (autoScrollEnabled) {
                 btn.classList.add('active');
                 btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i><span>自动滚动</span>';
-                scrollToBottomImmediate();
                 userScrolledUp = false;
+                scrollToBottomImmediate();
             } else {
                 btn.classList.remove('active');
                 btn.innerHTML = '<i class="bi bi-pause-circle"></i><span>暂停滚动</span>';
@@ -484,33 +691,51 @@
         }
 
         function setupScrollDetection() {
-            const terminal = document.getElementById('log-terminal');
-            const scrollBtn = document.getElementById('scroll-to-latest');
+            var terminal = document.getElementById('log-terminal');
+            var scrollBtn = document.getElementById('scroll-to-latest');
 
             terminal.addEventListener('scroll', function() {
-                const threshold = 150;
-                const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < threshold;
+                // 如果是程序触发的滚动，忽略
+                if (isProgrammaticScroll) return;
 
-                if (!atBottom) {
-                    userScrolledUp = true;
-                    scrollBtn.classList.add('show');
-                } else {
-                    userScrolledUp = false;
-                    scrollBtn.classList.remove('show');
-                }
+                // 防抖处理
+                if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
+                scrollDebounceTimer = setTimeout(function() {
+                    var threshold = 150;
+                    var atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < threshold;
+
+                    if (!atBottom) {
+                        userScrolledUp = true;
+                        scrollBtn.classList.add('show');
+                    } else {
+                        userScrolledUp = false;
+                        scrollBtn.classList.remove('show');
+                    }
+
+                    // 滚动到底部附近时，懒加载下一页
+                    if (atBottom && pagination.hasMore && !pagination.isLoading) {
+                        loadNextPage();
+                    }
+                }, SCROLL_DEBOUNCE_MS);
             });
         }
 
         function scrollToBottom() {
-            const terminal = document.getElementById('log-terminal');
+            var terminal = document.getElementById('log-terminal');
+            isProgrammaticScroll = true;
             terminal.scrollTo({ top: terminal.scrollHeight, behavior: 'smooth' });
+            setTimeout(function() { isProgrammaticScroll = false; }, 300);
         }
 
         function scrollToBottomImmediate() {
-            const terminal = document.getElementById('log-terminal');
+            var terminal = document.getElementById('log-terminal');
+            isProgrammaticScroll = true;
             terminal.scrollTop = terminal.scrollHeight;
+            // 立即重置标记
+            isProgrammaticScroll = false;
         }
 
+        // ========== 清除日志弹窗 ==========
         function showClearModal() {
             document.getElementById('clear-modal-overlay').classList.add('show');
             updateClearPreview();
@@ -537,18 +762,18 @@
         }
 
         function updateClearPreview() {
-            const type = document.querySelector('input[name="clear-type"]:checked').value;
-            let estimate = 0;
+            var type = document.querySelector('input[name="clear-type"]:checked').value;
+            var estimate = 0;
 
             if (type === 'time') {
-                const days = parseInt(document.getElementById('clear-days').value) || 30;
-                const cutoff = Date.now() - days * 86400000;
+                var days = parseInt(document.getElementById('clear-days').value) || 30;
+                var cutoff = Date.now() - days * 86400000;
                 estimate = currentLogs.filter(function(e) {
-                    const t = new Date(e.time || 0).getTime();
+                    var t = new Date(e.time || 0).getTime();
                     return t > 0 && t < cutoff;
                 }).length;
             } else {
-                const count = parseInt(document.getElementById('clear-count').value) || 10000;
+                var count = parseInt(document.getElementById('clear-count').value) || 10000;
                 estimate = Math.max(0, currentLogs.length - count);
             }
 
@@ -556,8 +781,8 @@
         }
 
         async function confirmClearLogs() {
-            const type = document.querySelector('input[name="clear-type"]:checked').value;
-            const categories = [];
+            var type = document.querySelector('input[name="clear-type"]:checked').value;
+            var categories = [];
             document.querySelectorAll('.clear-categories input:checked').forEach(function(cb) {
                 categories.push(cb.value);
             });
@@ -567,14 +792,14 @@
                 return;
             }
 
-            const value = type === 'time'
+            var value = type === 'time'
                 ? (parseInt(document.getElementById('clear-days').value) || 30)
                 : (parseInt(document.getElementById('clear-count').value) || 10000);
 
             showModal({title:'确认清除日志',content:'确定要清除 '+document.getElementById('clear-estimate').textContent+' 条日志吗？此操作不可撤销！',confirmText:'清除',danger:true,onConfirm:function(){
                 (async function(){
                     try {
-                        const response = await fetchAPI('/api/logs/clear', {
+                        var response = await fetchAPI('/api/logs/clear', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -586,7 +811,7 @@
                             })
                         });
 
-                        const data = await response.json();
+                        var data = await response.json();
 
                         if (data.success) {
                             showToast('日志清除成功', 'success');
@@ -602,15 +827,16 @@
             }});
         }
 
+        // ========== 导出日志 ==========
         function exportLogs(format) {
-            const logsToExport = filteredLogs.length > 0 ? filteredLogs : currentLogs;
+            var logsToExport = filteredLogs.length > 0 ? filteredLogs : currentLogs;
 
             if (logsToExport.length === 0) {
                 showToast('没有可导出的日志', 'warning');
                 return;
             }
 
-            let content, filename, mimeType;
+            var content, filename, mimeType;
 
             if (format === 'txt') {
                 content = logsToExport.map(function(log) {
@@ -630,21 +856,21 @@
 
         function toggleExportDropdown(event) {
             event.stopPropagation();
-            const menu = document.getElementById('export-dropdown-menu');
+            var menu = document.getElementById('export-dropdown-menu');
             menu.classList.toggle('show');
         }
 
         document.addEventListener('click', function() {
-            const menu = document.getElementById('export-dropdown-menu');
+            var menu = document.getElementById('export-dropdown-menu');
             if (menu) {
                 menu.classList.remove('show');
             }
         });
 
         function downloadFile(content, filename, mimeType) {
-            const blob = new Blob([content], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+            var blob = new Blob([content], { type: mimeType });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
             a.href = url;
             a.download = filename;
             document.body.appendChild(a);

@@ -158,15 +158,13 @@ export class RconConnection {
       cmd.collected += packet.payload;
       clearTimeout(cmd.timer);
 
-      const newTimer = setTimeout(() => {
+      cmd.timer = setTimeout(() => {
         const p = this.pending.get(cmd.requestId);
         if (p) {
           this.pending.delete(cmd.requestId);
-          p.resolve(rconErr('READ_TIMEOUT', `RCON read timeout for request ${cmd.requestId}`));
+          p.resolve(rconOk(cmd.collected));
         }
-      }, this.readTimeout);
-
-      cmd.timer = newTimer;
+      }, 50);
     } else {
       clearTimeout(cmd.timer);
       this.pending.delete(cmd.requestId);

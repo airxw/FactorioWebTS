@@ -5,6 +5,7 @@ import type { DbPeriodicMessage, DbTriggerResponse } from '../modules/chat/chat.
 import { listPeriodicMessages, listTriggerResponses } from '../modules/chat/chat.repository.js';
 import { SCHEDULER_PERIODIC_INTERVAL } from '../config/constants.js';
 import { eventBus, type EventKey, type EventMap } from './event-bus.js';
+import { getServerState, ServerState } from '../modules/server/server.service.js';
 
 interface PeriodicMessageState {
   id: number;
@@ -51,6 +52,10 @@ export class Scheduler {
   }
 
   private async handleChatEvent(data: { player: string; message: string }): Promise<void> {
+    // 仅在服务器 RUNNING 状态下响应，避免 STARTING/STOPPING 阶段发送无效指令
+    const { state } = getServerState();
+    if (state !== ServerState.RUNNING) return;
+
     let triggers: DbTriggerResponse[];
     try {
       const db = getDb();
@@ -77,6 +82,10 @@ export class Scheduler {
 
       const result = await sendGameCommand(cmd);
       if (!result.ok) {
+        const code = (result.error as { code?: string })?.code;
+        if (code === 'STATE_BLOCKED') {
+          return;
+        }
         logger.warn({ response, player: data.player, err: result.error }, '[Scheduler] Auto-response failed');
       }
       break;
@@ -147,6 +156,10 @@ export class Scheduler {
     item_count: number;
     target: string;
   }): Promise<void> {
+    // 仅在服务器 RUNNING 状态下发送，避免 STARTING/STOPPING 阶段发送无效指令
+    const { state } = getServerState();
+    if (state !== ServerState.RUNNING) return;
+
     let command: string;
     if (msg.type === 'give') {
       command = `/give ${msg.target} ${msg.item_code} ${msg.item_count}`;
@@ -156,6 +169,10 @@ export class Scheduler {
 
     const result = await sendGameCommand(command);
     if (!result.ok) {
+      const code = (result.error as { code?: string })?.code;
+      if (code === 'STATE_BLOCKED') {
+        return;
+      }
       logger.warn({ command, err: result.error }, '[Scheduler] Periodic message send failed');
     }
   }

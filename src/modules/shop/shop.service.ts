@@ -10,6 +10,7 @@ import type {
 import { AppError } from '../../types/index.js';
 import { sendGameCommand } from '../../lib/game-command-bus.js';
 import { logger } from '../../lib/logger.js';
+import { createShopCdk } from '../cdk/cdk.service.js';
 
 const GITHUB_ITEMS_URL = 'https://raw.githubusercontent.com/airxw/factorioitem/main/items.json';
 
@@ -161,7 +162,7 @@ export function createOrder(
   userId: number,
   userVipLevel: number,
   data: CreateOrderInput
-): { order: DbOrder; item: DbShopItem } {
+): { code: string; player_name: string; total_price: number } {
   const db = getDb();
 
   const item = repo.findItemById(db, data.item_id);
@@ -182,34 +183,22 @@ export function createOrder(
   }
 
   const multiplier = qualityMultipliers[data.quality_level] ?? 1;
-  const totalPrice = item.price * data.quantity * multiplier;
+  const totalPrice = Math.round(item.price * data.quantity * multiplier * 100) / 100;
 
-  const orderId = repo.createOrder(db, {
-    user_id: userId,
-    item_id: data.item_id,
-    player_name: data.player_name,
-    quantity: data.quantity,
-    total_price: Math.round(totalPrice * 100) / 100,
-    quality_level: data.quality_level,
-  });
+  const code = createShopCdk(userId, item, data.quantity, data.quality_level, data.player_name);
 
-  const order = repo.findOrderById(db, orderId)!;
-  return { order, item };
+  return { code, player_name: data.player_name, total_price: totalPrice };
 }
 
 export function createBatchOrder(
   userId: number,
   userVipLevel: number,
   data: CreateOrderBatchInput
-): Array<{ order: DbOrder; item: DbShopItem }> {
+): { codes: string[]; player_name: string; total_price: number } {
   const db = getDb();
 
-  const validated: Array<{
-    item: DbShopItem;
-    quantity: number;
-    quality_level: number;
-    totalPrice: number;
-  }> = [];
+  const codes: string[] = [];
+  let totalPrice = 0;
 
   for (const entry of data.items) {
     const item = repo.findItemById(db, entry.item_id);
@@ -230,28 +219,14 @@ export function createBatchOrder(
     }
 
     const multiplier = qualityMultipliers[entry.quality_level] ?? 1;
-    validated.push({
-      item,
-      quantity: entry.quantity,
-      quality_level: entry.quality_level,
-      totalPrice: Math.round(item.price * entry.quantity * multiplier * 100) / 100,
-    });
+    const price = Math.round(item.price * entry.quantity * multiplier * 100) / 100;
+    totalPrice += price;
+
+    const code = createShopCdk(userId, item, entry.quantity, entry.quality_level, data.player_name || '');
+    codes.push(code);
   }
 
-  const results: Array<{ order: DbOrder; item: DbShopItem }> = [];
-  for (const v of validated) {
-    const orderId = repo.createOrder(db, {
-      user_id: userId,
-      item_id: v.item.id,
-      player_name: data.player_name || '',
-      quantity: v.quantity,
-      total_price: v.totalPrice,
-      quality_level: v.quality_level,
-    });
-    results.push({ order: repo.findOrderById(db, orderId)!, item: v.item });
-  }
-
-  return results;
+  return { codes, player_name: data.player_name || '', total_price: Math.round(totalPrice * 100) / 100 };
 }
 
 export function getMyOrders(

@@ -120,13 +120,9 @@ export default async function shopRoutes(app: FastifyInstance) {
       return reply.status(201).send({
         success: true,
         data: {
-          order_id: result.order.id,
-          order_number: result.order.order_number,
-          item_name: result.item.name,
-          quantity: result.order.quantity,
-          total_price: result.order.total_price,
-          player_name: result.order.player_name,
-          status: result.order.status,
+          code: result.code,
+          player_name: result.player_name,
+          total_price: result.total_price,
         },
       });
     } catch (e) {
@@ -143,13 +139,11 @@ export default async function shopRoutes(app: FastifyInstance) {
 
     try {
       const userId = request.currentUser.user_id;
-      const results = service.createBatchOrder(userId, getUserVipLevel(userId), parsed.data);
-      const orderNumbers = results.map((r) => r.order.order_number);
-      const totalPrice = results.reduce((sum, r) => sum + r.order.total_price, 0);
+      const result = service.createBatchOrder(userId, getUserVipLevel(userId), parsed.data);
 
       return reply.status(201).send({
         success: true,
-        data: { order_numbers: orderNumbers, primary_order_number: orderNumbers[0], total_price: Math.round(totalPrice * 100) / 100, item_count: results.length },
+        data: { codes: result.codes, player_name: result.player_name, total_price: result.total_price, item_count: result.codes.length },
       });
     } catch (e) {
       const err = e as { statusCode?: number; message: string };

@@ -425,6 +425,44 @@ function ensureSchema(database: Database.Database): void {
     `,
   });
 
+  migrations.push({
+    name: '025_create_pending_commands',
+    sql: `
+      CREATE TABLE IF NOT EXISTS pending_commands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','delivered','failed','discarded')),
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        max_retries INTEGER NOT NULL DEFAULT 5,
+        retry_after INTEGER,
+        error_message TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_commands_status ON pending_commands(status);
+      CREATE INDEX IF NOT EXISTS idx_pending_commands_retry ON pending_commands(retry_after);
+    `,
+  });
+
+  migrations.push({
+    name: '026_create_cdk_codes',
+    sql: `
+      CREATE TABLE IF NOT EXISTS cdk_codes (
+        code TEXT PRIMARY KEY,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'UNUSED' CHECK(status IN ('UNUSED','USED')),
+        item_id INTEGER,
+        player_name TEXT,
+        type TEXT NOT NULL DEFAULT 'shop' CHECK(type IN ('shop','vip')),
+        user_id INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_cdk_codes_status ON cdk_codes(status);
+    `,
+  });
+
   for (const migration of migrations) {
     if (!appliedSet.has(migration.name)) {
       database.exec(migration.sql);
