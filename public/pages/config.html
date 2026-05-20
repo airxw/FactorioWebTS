@@ -7,9 +7,10 @@
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/bootstrap-icons.css">
     <script src="/js/htmx.min.js"></script>
+    <script src="/js/common.js"></script>
     <script src="/js/alpine.min.js" defer></script>
     </head>
-<body x-data="configApp()" x-init="init()">
+<body x-data="createPageApp(configApp())" x-init="init()">
     <div class="app-container">
         <aside class="sidebar" id="sidebar"></aside>
 
@@ -140,9 +141,11 @@
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center mb-3">
                         <h3 class="card-title">配置模板</h3>
-                        <button class="btn btn-sm btn-primary" @click="openCreateTemplate()"><i class="bi bi-plus-lg me-1"></i>创建模板</button>
+                        <button class="btn btn-sm btn-primary" :disabled="!activeConfig" @click="openCreateTemplate()"><i class="bi bi-plus-lg me-1"></i>创建模板</button>
+                        <span class="text-muted ms-2" style="font-size:12px;" x-show="!activeConfig">请先选择配置文件类型</span>
                     </div>
                     <div class="card-body">
+                        <div class="config-alert config-alert-error" x-show="templateError" x-text="templateError" style="margin-bottom:12px;"></div>
                         <div class="table-responsive">
                             <table class="table">
                                 <thead><tr><th>模板名称</th><th>描述</th><th>配置类型</th><th>创建时间</th><th>操作</th></tr></thead>
@@ -171,7 +174,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showTemplateModal" @click.self="showTemplateModal = false" :style="{ display: showTemplateModal ? 'flex' : 'none' }">
+    <div class="modal-overlay" x-show="showTemplateModal" @click.self="showTemplateModal = false" :style="{ display: showTemplateModal ? 'flex' : 'none' }">
         <div class="modal-dialog">
             <div class="modal-header"><h3>创建配置模板</h3><button class="modal-close" @click="showTemplateModal = false">&times;</button></div>
             <div class="modal-body">
@@ -316,6 +319,7 @@
         editorSuccess: '',
         showTemplateModal: false,
         templateForm: { name: '', config_type: '', description: '' },
+        templateError: '',
         editorMode: 'visual',
         visualData: null,
         visualActiveSection: '',
@@ -882,15 +886,16 @@
         },
 
         openCreateTemplate() {
-          if (!this.activeConfig) { this.showToast('请先在上方选择一种配置文件类型', 'warning'); return; }
+          this.templateError = '';
+          if (!this.activeConfig) { this.templateError = '请先在上方选择一种配置文件类型'; this.showToast('请先在上方选择一种配置文件类型', 'warning'); return; }
           if (this.editorMode === 'visual') {
             try {
               var vd = this.collectVisualData();
               this.configContent = JSON.stringify(vd, null, 2);
-            } catch(e) { this.showToast('无法收集表单数据: ' + e.message, 'error'); return; }
+            } catch(e) { this.templateError = '无法收集表单数据: ' + e.message; this.showToast('无法收集表单数据: ' + e.message, 'error'); return; }
           }
-          if (!this.configContent.trim()) { this.showToast('当前配置内容为空，无法创建模板', 'warning'); return; }
-          try { JSON.parse(this.configContent.trim()); } catch(e) { this.showToast('当前配置JSON格式错误，无法创建模板', 'error'); return; }
+          if (!this.configContent.trim()) { this.templateError = '当前配置内容为空，无法创建模板'; this.showToast('当前配置内容为空，无法创建模板', 'warning'); return; }
+          try { JSON.parse(this.configContent.trim()); } catch(e) { this.templateError = '当前配置JSON格式错误，无法创建模板'; this.showToast('当前配置JSON格式错误，无法创建模板', 'error'); return; }
           this.templateForm = { name: '', config_type: this.activeConfig || '', description: '' };
           this.showTemplateModal = true;
         },
@@ -940,22 +945,6 @@
         formatTs(ts) {
           if (!ts) return '-';
           return new Date(ts * 1000).toLocaleString('zh-CN');
-        },
-
-        authHeaders(ct) {
-          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
-          if (ct) h['Content-Type'] = ct;
-          return h;
-        },
-
-        showToast(msg, type) {
-          var container = document.getElementById('toast-container');
-          var toast = document.createElement('div');
-          toast.className = 'toast-item toast-' + (type || 'info');
-          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
-          container.appendChild(toast);
-          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
-          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
         },
 
         toggleBackupPanel() {

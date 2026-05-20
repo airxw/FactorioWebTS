@@ -27,7 +27,7 @@ export default async function versionRoutes(app: FastifyInstance) {
     const parsed = versionUpgradeSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
     try {
-      service.installVersion(parsed.data.target_version, parsed.data.release_type);
+      await service.installVersion(parsed.data.target_version, parsed.data.release_type);
       return reply.send({ success: true, message: '版本安装中' });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message: string };

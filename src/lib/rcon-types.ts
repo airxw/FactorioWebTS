@@ -5,7 +5,6 @@ export type RconErrorCode =
   | 'READ_TIMEOUT'
   | 'NOT_CONNECTED'
   | 'PARSE_ERROR'
-  | 'POOL_EXHAUSTED'
   | 'DISCONNECTED';
 
 export class RconError extends Error {

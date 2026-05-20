@@ -2,13 +2,14 @@ import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileS
 import path from 'node:path';
 import { AppError } from '../../types/index.js';
 import { resolveLogPath, resolveLogsDir } from '../../lib/paths.js';
+import { logReader } from '../../lib/log-reader.js';
 
 function getLogsDir(): string {
   return resolveLogsDir();
 }
 
 function getCurrentLogPath(): string {
-  return resolveLogPath();
+  return logReader.currentLogPath || resolveLogPath();
 }
 
 export interface LogEntry {

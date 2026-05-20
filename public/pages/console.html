@@ -7,9 +7,10 @@
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/bootstrap-icons.css">
     <script src="/js/htmx.min.js"></script>
+    <script src="/js/common.js"></script>
     <script src="/js/alpine.min.js" defer></script>
 </head>
-<body x-data="consoleApp()" x-init="init()">
+<body x-data="createPageApp(consoleApp())" x-init="init()">
     <div class="app-container">
         <aside class="sidebar" id="sidebar"></aside>
 
@@ -134,6 +135,7 @@
         cmdHistory: [],
         historyVisible: false,
         historyIdx: -1,
+        pollTimer: null,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -142,6 +144,7 @@
           if (!token) { window.location.href = 'login.html'; return; }
           if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
           this.refreshStatus();
+          this.pollTimer = setInterval(() => this.refreshStatus(), 10000);
         },
 
         async refreshStatus() {
@@ -151,16 +154,20 @@
             var data = await res.json();
             if (data.success && data.data) {
               var d = data.data;
-              if (d.running) {
+              var state = d.state || 'unknown';
+              if (state === 'starting') {
+                this.statusClass = 'status-loading'; this.serverStatus = '启动中...';
+              } else if (state === 'running' || d.running === true) {
                 this.statusClass = 'status-online'; this.serverStatus = '在线';
                 this.serverVersion = d.version || '?'; this.playerCount = d.playerCount ?? '?';
                 localStorage.setItem('server_running', 'true');
                 if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) {
                   SidebarMenu.refresh();
                 }
-              } else if (d.processRunning) {
-                this.statusClass = 'status-loading'; this.serverStatus = '启动中...';
-                this.serverVersion = d.version || '?'; this.playerCount = '0';
+              } else if (state === 'stopping') {
+                this.statusClass = 'status-loading'; this.serverStatus = '停止中...';
+              } else if (state === 'error') {
+                this.statusClass = 'status-offline'; this.serverStatus = '异常';
               } else {
                 this.statusClass = 'status-offline'; this.serverStatus = '离线 - <a href="server-control.html" style="color:#f0a030;text-decoration:underline;">请先启动服务器</a>';
                 localStorage.setItem('server_running', 'false');
@@ -256,21 +263,6 @@
 
         now() { return new Date().toLocaleTimeString('zh-CN'); },
 
-        authHeaders(ct) {
-          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
-          if (ct) h['Content-Type'] = ct;
-          return h;
-        },
-
-        showToast(msg, type) {
-          var container = document.getElementById('toast-container');
-          var toast = document.createElement('div');
-          toast.className = 'toast-item toast-' + (type || 'info');
-          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
-          container.appendChild(toast);
-          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
-          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
-        }
       };
     }
     </script>

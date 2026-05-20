@@ -18,8 +18,12 @@ import voteRoutes from './modules/vote/vote.routes.js';
 import fileRoutes from './modules/file/file.routes.js';
 import logRoutes from './modules/log/log.routes.js';
 import versionRoutes from './modules/version/version.routes.js';
+import backupRoutes from './modules/backup/backup.routes.js';
 import { scheduler } from './lib/scheduler.js';
+import { initChatEventSubscriptions } from './modules/chat/chat.service.js';
 import { startLogWatcher, stopLogWatcher } from './lib/log-watcher.js';
+import { logReader } from './lib/log-reader.js';
+import { startLogRotationCheck } from './lib/log-rotation.js';
 
 export async function buildApp() {
   const env = loadEnv();
@@ -77,20 +81,27 @@ export async function buildApp() {
   await app.register(fileRoutes);
   await app.register(logRoutes);
   await app.register(versionRoutes);
+  await app.register(backupRoutes);
 
   await registerStatic(app);
 
   startLogWatcher();
+  initChatEventSubscriptions();
   scheduler.start();
+  const logRotationTimer = startLogRotationCheck();
 
   process.on('SIGINT', () => {
     scheduler.stop();
+    logReader.stop();
     stopLogWatcher();
+    clearInterval(logRotationTimer);
     process.exit(0);
   });
   process.on('SIGTERM', () => {
     scheduler.stop();
+    logReader.stop();
     stopLogWatcher();
+    clearInterval(logRotationTimer);
     process.exit(0);
   });
 

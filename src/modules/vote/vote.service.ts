@@ -4,15 +4,14 @@ import type { VoteConfigInput, StartVoteInput, CastVoteInput, BanPlayerInput } f
 import { sendGameCommand, fireAndForget } from '../../lib/game-command-bus.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../lib/logger.js';
-
-const VOTE_DURATION_SECONDS = 60;
+import { VOTE_DURATION_SECONDS, VOTE_DEFAULT_PASS_RATIO, VOTE_DEFAULT_MIN_VOTES, VOTE_DEFAULT_COOLDOWN_SECONDS } from '../../config/constants.js';
 
 export function getVoteConfig() {
   const raw = repo.getVoteConfig(getDb());
   return {
-    pass_ratio: parseInt(raw.pass_ratio || '60', 10),
-    min_votes: parseInt(raw.min_votes || '3', 10),
-    cooldown_seconds: parseInt(raw.cooldown_seconds || '300', 10),
+    pass_ratio: parseInt(raw.pass_ratio || String(VOTE_DEFAULT_PASS_RATIO), 10),
+    min_votes: parseInt(raw.min_votes || String(VOTE_DEFAULT_MIN_VOTES), 10),
+    cooldown_seconds: parseInt(raw.cooldown_seconds || String(VOTE_DEFAULT_COOLDOWN_SECONDS), 10),
   };
 }
 

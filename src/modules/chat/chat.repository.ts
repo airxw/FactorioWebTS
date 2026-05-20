@@ -199,3 +199,34 @@ export function upsertPlayerEvent(db: Database.Database, data: { event_type: str
     ON CONFLICT(event_type) DO UPDATE SET enabled = excluded.enabled, message = excluded.message, target = excluded.target, updated_at = excluded.updated_at
   `).run({ ...data, updated_at: now });
 }
+
+export function getLastLogoutTime(db: Database.Database, playerName: string): number {
+  const row = db.prepare("SELECT created_at FROM player_histories WHERE player_name = ? AND event_type = 'logout' ORDER BY created_at DESC LIMIT 1").get(playerName) as { created_at: number } | undefined;
+  return row ? row.created_at : 0;
+}
+
+export interface DbFirstJoinPlayer {
+  player_name: string;
+  first_join_at: number;
+  gift_claimed: number;
+  gift_claimed_at: number | null;
+}
+
+export function listFirstJoinPlayers(db: Database.Database): DbFirstJoinPlayer[] {
+  return db.prepare(`
+    SELECT ph.player_name, MIN(ph.created_at) as first_join_at,
+      CASE WHEN gc.id IS NOT NULL THEN 1 ELSE 0 END as gift_claimed,
+      gc.claimed_at as gift_claimed_at
+    FROM player_histories ph
+    LEFT JOIN gift_claims gc ON gc.player_name = ph.player_name AND gc.gift_type = 'first'
+    WHERE ph.event_type = 'login'
+    GROUP BY ph.player_name
+    ORDER BY first_join_at DESC
+  `).all() as DbFirstJoinPlayer[];
+}
+
+export function resetFirstJoinPlayer(db: Database.Database, playerName: string): { deleted_events: number; deleted_gifts: number } {
+  const deletedEvents = db.prepare("DELETE FROM player_histories WHERE player_name = ?").run(playerName).changes;
+  const deletedGifts = db.prepare("DELETE FROM gift_claims WHERE player_name = ?").run(playerName).changes;
+  return { deleted_events: deletedEvents, deleted_gifts: deletedGifts };
+}

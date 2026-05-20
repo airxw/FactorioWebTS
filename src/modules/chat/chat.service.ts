@@ -1,13 +1,16 @@
 import { getDb } from '../../lib/database.js';
+import { logger } from '../../lib/logger.js';
 import * as repo from './chat.repository.js';
 import type { TriggerResponseInput, ServerResponseInput, PeriodicMessageInput, PlayerEventInput } from './chat.schema.js';
 import { AppError } from '../../types/index.js';
 import { sendGameCommand, fireAndForget } from '../../lib/game-command-bus.js';
 import { getOnlinePlayers } from '../player/player.service.js';
 import { recordEvent } from '../player/player.repository.js';
+import { eventBus } from '../../lib/event-bus.js';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveConfigDir } from '../../lib/paths.js';
+import { SERVER_NAME_CACHE_TTL } from '../../config/constants.js';
 
 interface GiftItem {
   name: string;
@@ -18,7 +21,6 @@ interface GiftItem {
 
 let cachedServerName: string | null = null;
 let serverNameCacheTime = 0;
-const SERVER_NAME_CACHE_TTL = 60000;
 
 function getServerName(): string {
   const now = Date.now();
@@ -38,13 +40,13 @@ function getServerName(): string {
         return name;
       }
     }
-  } catch {}
+  } catch (e) { logger.warn({ err: e }, '[Chat] Failed to read server-settings.json for server name'); }
   cachedServerName = 'Factorio Server';
   serverNameCacheTime = now;
   return cachedServerName;
 }
 
-export function clearServerNameCache(): void {
+function clearServerNameCache(): void {
   cachedServerName = null;
   serverNameCacheTime = 0;
 }
@@ -63,29 +65,46 @@ function isEnabled(value: unknown): boolean {
   return false;
 }
 
+const GIFT_ITEM_DELAY_MS = 300;
+
 async function sendGiftItems(playerName: string, items: GiftItem[]): Promise<void> {
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const count = item.count || 1;
     let command = `/give ${playerName} ${item.code} ${count}`;
     if (item.quality && item.quality !== 'normal') {
       command += ` ${item.quality}`;
     }
     fireAndForget(command);
+    if (i < items.length - 1) {
+      await new Promise(r => setTimeout(r, GIFT_ITEM_DELAY_MS));
+    }
   }
 }
 
-export async function processPlayerJoin(playerName: string): Promise<void> {
+async function getOnlinePlayersWithTimeout(timeoutMs: number): Promise<number> {
+  try {
+    const result = await Promise.race([
+      getOnlinePlayers(),
+      new Promise<string[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+    ]);
+    return result.length;
+  } catch (e) {
+    logger.warn({ err: e }, '[Chat] Failed to get online players (timeout/RCON)');
+    return 0;
+  }
+}
+
+const ONLINE_PLAYERS_TIMEOUT_MS = 3000;
+
+async function processPlayerJoin(playerName: string): Promise<void> {
   const db = getDb();
   const settings = repo.getChatSettings(db);
   const isFirstJoin = !repo.hasPlayerLoginEvent(db, playerName);
 
   recordEvent(playerName, 'login', {});
 
-  let onlineCount = 0;
-  try {
-    const players = await getOnlinePlayers();
-    onlineCount = players.length;
-  } catch {}
+  const onlineCount = await getOnlinePlayersWithTimeout(ONLINE_PLAYERS_TIMEOUT_MS);
 
   if (isFirstJoin) {
     if (isEnabled(settings.first_join_enabled) && settings.first_join_message) {
@@ -99,13 +118,13 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
           await sendGiftItems(playerName, items);
           repo.addGiftClaim(db, playerName, 'first', settings.first_gift_items);
         }
-      } catch (e) { console.error('[Chat] Send first-gift failed:', e); }
+      } catch (e) { logger.warn({ err: e }, '[Chat] Send first-gift failed'); }
     }
-  } else {
-    if (isEnabled(settings.join_enabled) && settings.join_message) {
-      const msg = replaceMessageVariables(settings.join_message, playerName, onlineCount);
-      fireAndForget(`/say ${msg}`);
-    }
+  }
+
+  if (isEnabled(settings.join_enabled) && settings.join_message) {
+    const msg = replaceMessageVariables(settings.join_message, playerName, onlineCount);
+    fireAndForget(`/say ${msg}`);
   }
 
   if (!isFirstJoin && isEnabled(settings.relogin_gift_enabled) && settings.relogin_gift_items) {
@@ -116,17 +135,19 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
         const dailyLimit = parseInt(settings.relogin_daily_limit || '1', 10);
         const totalLimit = parseInt(settings.relogin_total_limit || '0', 10);
 
-        const lastClaimTime = repo.getLastGiftClaimTime(db, playerName, 'relogin');
+        const lastLogoutTime = repo.getLastLogoutTime(db, playerName);
         const now = Math.floor(Date.now() / 1000);
         const cooldownSeconds = cooldownHours * 3600;
 
-        if (now - lastClaimTime >= cooldownSeconds) {
+        const isEligible = lastLogoutTime > 0 && (now - lastLogoutTime) >= cooldownSeconds;
+
+        if (cooldownHours === 0 || isEligible) {
           const todayStart = new Date();
           todayStart.setHours(0, 0, 0, 0);
           const todayTimestamp = Math.floor(todayStart.getTime() / 1000);
           const todayCount = repo.countGiftClaimsSince(db, playerName, 'relogin', todayTimestamp);
 
-          if (todayCount < dailyLimit) {
+          if (dailyLimit === 0 || todayCount < dailyLimit) {
             if (totalLimit === 0 || repo.countGiftClaimsTotal(db, playerName, 'relogin') < totalLimit) {
               await sendGiftItems(playerName, items);
               repo.addGiftClaim(db, playerName, 'relogin', settings.relogin_gift_items);
@@ -134,22 +155,19 @@ export async function processPlayerJoin(playerName: string): Promise<void> {
           }
         }
       }
-    } catch (e) { console.error('[Chat] Send relogin gift failed:', e); }
+    } catch (e) { logger.warn({ err: e }, '[Chat] Send relogin gift failed'); }
   }
 }
 
-export async function processPlayerLeave(playerName: string): Promise<void> {
+async function processPlayerLeave(playerName: string): Promise<void> {
   const db = getDb();
   const settings = repo.getChatSettings(db);
 
   recordEvent(playerName, 'logout', {});
 
   if (isEnabled(settings.leave_enabled) && settings.leave_message) {
-    let onlineCount = 0;
-    try {
-      const players = await getOnlinePlayers();
-      onlineCount = Math.max(0, players.length - 1);
-    } catch {}
+    const playersOnline = await getOnlinePlayersWithTimeout(ONLINE_PLAYERS_TIMEOUT_MS);
+    const onlineCount = Math.max(0, playersOnline - 1);
     const msg = replaceMessageVariables(settings.leave_message, playerName, onlineCount);
     fireAndForget(`/say ${msg}`);
   }
@@ -253,4 +271,32 @@ export function savePlayerEvent(data: PlayerEventInput) {
     message: data.message ?? '',
     target: data.target ?? '',
   });
+}
+
+export function initChatEventSubscriptions(): void {
+  eventBus.on('player:join', (data) => {
+    processPlayerJoin(data.playerName).catch(err => {
+      logger.error({ err, playerName: data.playerName }, '[Chat] processPlayerJoin failed');
+    });
+  });
+  eventBus.on('player:leave', (data) => {
+    processPlayerLeave(data.playerName).catch(err => {
+      logger.error({ err, playerName: data.playerName }, '[Chat] processPlayerLeave failed');
+    });
+  });
+  eventBus.on('config:server-settings-changed', () => {
+    clearServerNameCache();
+  });
+}
+
+export function listFirstJoinPlayers() {
+  return repo.listFirstJoinPlayers(getDb());
+}
+
+export function resetFirstJoinPlayer(playerName: string): { deleted_events: number; deleted_gifts: number } {
+  if (!playerName || typeof playerName !== 'string' || playerName.trim().length === 0) {
+    throw new AppError('玩家名称不能为空', 400);
+  }
+  const db = getDb();
+  return repo.resetFirstJoinPlayer(db, playerName.trim());
 }

@@ -1,10 +1,12 @@
 import { getDb } from '../../lib/database.js';
+import { logger } from '../../lib/logger.js';
 import * as repo from './config.repository.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 import { AppError } from '../../types/index.js';
 import { resolveConfigDir } from '../../lib/paths.js';
-import { clearServerNameCache } from '../chat/chat.service.js';
+import { eventBus } from '../../lib/event-bus.js';
+import { MAX_BACKUP_COUNT } from '../../config/constants.js';
 
 const CONFIG_FILE_TYPES: Record<string, { filename: string; isList: boolean }> = {
   'server-settings': { filename: 'server-settings.json', isList: false },
@@ -86,7 +88,7 @@ export function listBackups(fileType: string) {
           created_at: stat.birthtime.toISOString(),
           size: stat.size,
         };
-      } catch { return null; }
+      } catch (e) { logger.warn({ err: e }, '[Config] Failed to stat backup file'); return null; }
     })
     .filter((b): b is NonNullable<typeof b> => b !== null)
     .sort((a, b) => (b.timestamp > a.timestamp ? 1 : -1));
@@ -109,7 +111,7 @@ export function restoreBackup(fileType: string, timestamp: string): void {
   copyFileSync(backupFile, targetPath);
 
   if (fileType === 'server-settings') {
-    clearServerNameCache();
+    eventBus.emit('config:server-settings-changed', {});
   }
 }
 
@@ -125,7 +127,7 @@ export function cleanupBackups(fileType: string, keepCount: number = 10): number
     try {
       unlinkSync(path.join(backupDir, bk.filename));
       deleted++;
-    } catch { /* skip */ }
+    } catch (e) { logger.warn({ err: e }, '[Config] Failed to delete backup file'); }
   }
 
   return deleted;
@@ -142,7 +144,7 @@ function createBackup(fileType: string, filePath: string): void {
   const backupPath = path.join(backupDir, timestamp + '.json');
 
   writeFileSync(backupPath, currentContent);
-  cleanupBackups(fileType, 20);
+  cleanupBackups(fileType, MAX_BACKUP_COUNT);
 }
 
 export function saveConfigFile(fileType: string, content: string): void {
@@ -174,7 +176,7 @@ export function saveConfigFile(fileType: string, content: string): void {
   writeFileSync(filePath, formatted + '\n');
 
   if (fileType === 'server-settings') {
-    clearServerNameCache();
+    eventBus.emit('config:server-settings-changed', {});
   }
 }
 

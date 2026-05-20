@@ -1,8 +1,8 @@
 import os from 'os';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getRconPool, closeRconPool } from '../../lib/rcon.js';
+import { getRconManager, closeRconManager, RconConnection, resolveRconSettings } from '../../lib/rcon.js';
 import { sendGameCommand } from '../../lib/game-command-bus.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../lib/logger.js';
@@ -28,8 +28,7 @@ export type ServerStateValue = (typeof ServerState)[keyof typeof ServerState];
 
 const BLOCKED_COMMANDS = [/shutdown/i, /quit/i, /exit/i, /^lua\s*=/i];
 const MAX_COMMAND_LENGTH = 500;
-const RCON_READY_POLL_MS = 2000;
-const RCON_READY_TIMEOUT_MS = 60000;
+const RCON_DETECT_TIMEOUT_MS = 5000;
 const PROCESS_EXIT_TIMEOUT_MS = 20000;
 
 let state: ServerStateValue = ServerState.UNKNOWN;
@@ -51,10 +50,10 @@ function setState(newState: ServerStateValue): void {
   const allowed: Record<ServerStateValue, ServerStateValue[]> = {
     [ServerState.UNKNOWN]: [ServerState.OFF, ServerState.RUNNING, ServerState.STARTING, ServerState.STOPPING, ServerState.ERROR],
     [ServerState.OFF]: [ServerState.STARTING],
-    [ServerState.STARTING]: [ServerState.RUNNING, ServerState.ERROR, ServerState.OFF],
+    [ServerState.STARTING]: [ServerState.RUNNING, ServerState.ERROR, ServerState.OFF, ServerState.STOPPING],
     [ServerState.RUNNING]: [ServerState.STOPPING, ServerState.ERROR],
     [ServerState.STOPPING]: [ServerState.OFF, ServerState.ERROR],
-    [ServerState.ERROR]: [ServerState.OFF, ServerState.STARTING],
+    [ServerState.ERROR]: [ServerState.OFF, ServerState.STARTING, ServerState.STOPPING],
   };
 
   if (!allowed[prev]?.includes(newState)) {
@@ -119,7 +118,7 @@ function validateCommand(command: string): void {
 
 function findFactorioPid(): number | null {
   try {
-    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 2000 })
+    const stdout = execSync('pgrep -f "bin/x64/factorio\\s+--start-server"', { timeout: 2000 })
       .toString()
       .trim();
     if (!stdout) return null;
@@ -129,17 +128,17 @@ function findFactorioPid(): number | null {
   }
 }
 
-function killAllFactorioProcesses(): boolean {
+function killAllFactorioProcesses(signal: NodeJS.Signals = 'SIGTERM'): boolean {
   try {
-    const stdout = execSync('pgrep -f "factorio.*--start-server"', { timeout: 3000 })
+    const stdout = execSync('pgrep -f "bin/x64/factorio\\s+--start-server"', { timeout: 3000 })
       .toString()
       .trim();
     if (!stdout) return false;
     const pids = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
     for (const pid of pids) {
       try {
-        process.kill(parseInt(pid, 10), 'SIGTERM');
-        logger.info({ pid }, 'Sent SIGTERM to Factorio process');
+        process.kill(parseInt(pid, 10), signal);
+        logger.info({ pid, signal }, 'Sent signal to Factorio process');
       } catch {}
     }
     return pids.length > 0;
@@ -155,28 +154,25 @@ async function waitForProcessExit(timeoutMs: number): Promise<void> {
     if (!pid) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
-  killAllFactorioProcesses();
+  killAllFactorioProcesses('SIGKILL');
 }
 
-function attachProcessListeners(child: ChildProcess, logPath: string): void {
+function attachProcessListeners(child: ChildProcess): void {
   child.stdout?.on('data', (data: Buffer) => {
     const msg = data.toString().trim();
     if (!msg) return;
     logger.info({ source: 'factorio' }, msg);
-    try { appendFileSync(logPath, msg + '\n', 'utf-8'); } catch {}
   });
 
   child.stderr?.on('data', (data: Buffer) => {
     const msg = data.toString().trim();
     if (!msg) return;
     logger.error({ source: 'factorio' }, msg);
-    try { appendFileSync(logPath, msg + '\n', 'utf-8'); } catch {}
   });
 
   child.on('error', (err: Error) => {
     logger.error({ err }, 'Factorio process start failed');
     lastExitError = err.message;
-    try { appendFileSync(logPath, `[ERROR] Start failed: ${err.message}\n`, 'utf-8'); } catch {}
     serverProcess = null;
     serverStartTime = 0;
     setState(ServerState.ERROR);
@@ -185,17 +181,20 @@ function attachProcessListeners(child: ChildProcess, logPath: string): void {
   child.on('exit', (code: number | null, signal: string | null) => {
     lastExitCode = code;
     lastExitSignal = signal;
-    if (code !== 0) {
-      const msg = `[ERROR] Factorio process exited abnormally (code=${code}, signal=${signal})`;
+    if (code !== 0 && stoppingRequestedAt === 0) {
+      const msg = `Factorio process exited abnormally (code=${code}, signal=${signal})`;
       lastExitError = msg;
       logger.error({ exitCode: code, signal }, msg);
-      try { appendFileSync(logPath, msg + '\n', 'utf-8'); } catch {}
       setState(ServerState.ERROR);
     } else {
+      if (code !== 0) {
+        logger.warn({ exitCode: code, signal }, 'Factorio process exited during stop');
+      } else {
+        logger.info({ exitCode: code, signal }, 'Factorio process exited');
+      }
       lastExitError = '';
       lastExitCode = null;
       lastExitSignal = null;
-      logger.info({ exitCode: code }, 'Factorio process exited');
       setState(ServerState.OFF);
     }
     serverProcess = null;
@@ -207,16 +206,64 @@ function attachProcessListeners(child: ChildProcess, logPath: string): void {
   });
 }
 
-async function waitForRconReady(timeoutMs: number): Promise<boolean> {
+async function waitForRconReady(settings: { host: string; port: number; password: string }, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await sendGameCommand('/version');
-    if (result.ok && result.value.length > 0 && !result.value.toLowerCase().includes('error')) {
-      return true;
-    }
-    await new Promise((r) => setTimeout(r, RCON_READY_POLL_MS));
+    try {
+      const conn = new RconConnection(settings.host, settings.port, settings.password, 2000, 5000);
+      const result = await conn.connect();
+      conn.disconnect();
+      if (result.ok && result.value) {
+        return true;
+      }
+      if (!result.ok && result.error.code === 'AUTHENTICATION_FAILED') {
+        return false;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 2000));
   }
   return false;
+}
+
+function scheduleRconRetry(settings: { host: string; port: number; password: string }, initialDelayMs = 0): void {
+  const maxRetries = 20;
+  let attempts = 0;
+
+  const tryConnect = async () => {
+    if (state !== ServerState.STARTING) return;
+    attempts++;
+    try {
+      const conn = new RconConnection(settings.host, settings.port, settings.password, 2000, 5000);
+      const result = await conn.connect();
+      conn.disconnect();
+      if (result.ok && result.value) {
+        setState(ServerState.RUNNING);
+        getRconManager().connect().catch((e) => {
+          logger.warn({ err: e }, '[Server] RconManager connect failed after RCON ready');
+        });
+        return;
+      }
+      if (!result.ok && result.error.code === 'AUTHENTICATION_FAILED') {
+        setState(ServerState.ERROR);
+        return;
+      }
+    } catch (e) {
+      logger.debug({ err: e, attempt: attempts }, '[Server] RCON retry connect error');
+    }
+    if (attempts < maxRetries && state === ServerState.STARTING) {
+      setTimeout(tryConnect, 5000);
+    } else if (attempts >= maxRetries) {
+      logger.warn({ attempts }, '[Server] RCON retry exhausted, transitioning to ERROR');
+      setState(ServerState.ERROR);
+      if (serverProcess && serverProcess.exitCode === null) {
+        serverProcess.kill('SIGTERM');
+      } else {
+        killAllFactorioProcesses();
+      }
+    }
+  };
+
+  setTimeout(tryConnect, initialDelayMs);
 }
 
 async function tryDetectRunning(): Promise<void> {
@@ -232,10 +279,15 @@ async function tryDetectRunning(): Promise<void> {
   const pid = findFactorioPid();
   if (pid) {
     setState(ServerState.STARTING);
-    const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
+    const rconSettings = resolveRconSettings();
+    const ready = await waitForRconReady(rconSettings, RCON_DETECT_TIMEOUT_MS);
     if (ready) {
       setState(ServerState.RUNNING);
+      return;
     }
+    logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+    setState(ServerState.OFF);
     return;
   }
 
@@ -341,7 +393,8 @@ export async function startServer(
   if (orphan) {
     serverStartTime = serverStartTime || Date.now();
     setState(ServerState.STARTING);
-    const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
+    const rconSettings = resolveRconSettings();
+    const ready = await waitForRconReady(rconSettings, RCON_DETECT_TIMEOUT_MS);
     if (ready) {
       setState(ServerState.RUNNING);
       return { message: 'Server is already running (detected existing process)' };
@@ -350,78 +403,82 @@ export async function startServer(
     return { message: 'Detected orphan process but RCON unreachable, please stop first' };
   }
 
-  const savesDir = resolveSavesDir();
-  const configDir = resolveConfigDir();
-
-  if (!map) throw new AppError('Please select a save file', 400);
-
-  const savePath = path.join(savesDir, map);
-  if (!existsSync(savePath)) throw new AppError(`Save file not found: ${map}`, 400);
-
-  const serverSettingsFile = config || 'server-settings.json';
-  const serverSettingsPath = path.join(configDir, serverSettingsFile);
-  if (!existsSync(serverSettingsPath))
-    throw new AppError(`Server config not found: ${serverSettingsFile}`, 400);
-
-  const { binPath, rootDir } = findFactorioBinary(version);
-
-  let rconPort = 0;
-  let rconPassword = '';
-  try {
-    const raw = readFileSync(serverSettingsPath, 'utf-8');
-    const settings = JSON.parse(raw);
-    rconPort = parseInt(settings.rcon_port || settings['rcon-port'] || '0', 10);
-    rconPassword = settings.rcon_password || settings['rcon-password'] || '';
-  } catch {}
-
-  const args = ['--start-server', savePath, '--server-settings', serverSettingsPath];
-  if (rconPort > 0 && rconPort <= 65535 && rconPassword) {
-    args.push('--rcon-port', String(rconPort));
-    args.push('--rcon-password', rconPassword);
-  }
-
-  const logPath = resolveLogPath(version);
-  const logDir = path.dirname(logPath);
-  try { mkdirSync(logDir, { recursive: true }); } catch {}
-
-  currentSaveName = map;
-  currentConfigName = serverSettingsFile;
+  currentSaveName = map || '';
+  currentConfigName = config || 'server-settings.json';
   serverVersion = version || '';
-  serverLogPath = logPath;
+  serverStartTime = Date.now();
   stoppingRequestedAt = 0;
 
-  setState(ServerState.STARTING);
+  try {
+    const savesDir = resolveSavesDir();
+    const configDir = resolveConfigDir();
 
-  logger.info({ binPath, args, cwd: rootDir, logPath }, 'Starting Factorio server');
+    if (!map) throw new AppError('Please select a save file', 400);
 
-  const child = spawn(binPath, args, {
-    cwd: rootDir,
-    env: { ...process.env },
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+    const savePath = path.join(savesDir, map);
+    if (!existsSync(savePath)) throw new AppError(`Save file not found: ${map}`, 400);
 
-  serverProcess = child;
-  serverStartTime = Date.now();
-  attachProcessListeners(child, logPath);
-  child.unref();
+    const serverSettingsFile = config || 'server-settings.json';
+    const serverSettingsPath = path.join(configDir, serverSettingsFile);
+    if (!existsSync(serverSettingsPath))
+      throw new AppError(`Server config not found: ${serverSettingsFile}`, 400);
 
-  setTimeout(() => resetLogWatcher(logPath), 1000);
+    setState(ServerState.STARTING);
 
-  closeRconPool();
+    const { binPath, rootDir } = findFactorioBinary(version);
 
-  const ready = await waitForRconReady(RCON_READY_TIMEOUT_MS);
-  if (ready) {
-    setState(ServerState.RUNNING);
-    return { message: 'Server started successfully' };
+    let rconPort = 0;
+    let rconPassword = '';
+    try {
+      const raw = readFileSync(serverSettingsPath, 'utf-8');
+      const settings = JSON.parse(raw);
+      rconPort = parseInt(settings.rcon_port || settings['rcon-port'] || '0', 10);
+      rconPassword = settings.rcon_password || settings['rcon-password'] || '';
+    } catch {}
+
+    if (!rconPort || rconPort <= 0 || rconPort > 65535 || !rconPassword) {
+      throw new AppError(
+        'RCON 未配置，无法管理服务器。请在 ' + serverSettingsFile + ' 中设置 rcon_port 和 rcon_password',
+        400
+      );
+    }
+
+    const args = ['--start-server', savePath, '--server-settings', serverSettingsPath];
+
+    const logPath = resolveLogPath(version);
+    const logDir = path.dirname(logPath);
+    try { mkdirSync(logDir, { recursive: true }); } catch {}
+
+    serverLogPath = logPath;
+
+    logger.info({ binPath, args, cwd: rootDir, logPath }, 'Starting Factorio server');
+
+    const child = spawn(binPath, args, {
+      cwd: rootDir,
+      env: { ...process.env },
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    serverProcess = child;
+    attachProcessListeners(child);
+
+    resetLogWatcher(logPath);
+
+    closeRconManager();
+
+    scheduleRconRetry({ host: '127.0.0.1', port: rconPort, password: rconPassword }, 5000);
+
+    logger.info({ binPath, args, cwd: rootDir, rconPort }, 'Factorio process spawned, RCON detection started');
+    return { message: 'Server process spawned, waiting for startup...' };
+  } catch (e) {
+    if (e instanceof AppError && e.statusCode === 400) {
+      setState(ServerState.OFF);
+    } else {
+      setState(ServerState.ERROR);
+    }
+    throw e;
   }
-
-  if (state === ServerState.ERROR) {
-    return { message: 'Server start failed: ' + lastExitError };
-  }
-
-  logger.warn({ host: '127.0.0.1' }, 'Server started but RCON not ready yet');
-  return { message: 'Server process started, waiting for RCON...' };
 }
 
 export async function stopServer(): Promise<{ message: string }> {
@@ -461,8 +518,8 @@ export async function stopServer(): Promise<{ message: string }> {
 
   const remaining = findFactorioPid();
   if (remaining) {
-    logger.warn({ pid: remaining }, 'Process did not respond to SIGTERM, forcing kill');
-    killAllFactorioProcesses();
+    logger.warn({ pid: remaining }, 'Process did not respond to SIGTERM, forcing kill with SIGKILL');
+    killAllFactorioProcesses('SIGKILL');
     await new Promise((r) => setTimeout(r, 3000));
   }
 
@@ -470,8 +527,12 @@ export async function stopServer(): Promise<{ message: string }> {
   serverStartTime = 0;
   currentSaveName = '';
   currentConfigName = '';
-  closeRconPool();
-  setState(ServerState.OFF);
+  stoppingRequestedAt = 0;
+  closeRconManager();
+  const currentState = state as ServerStateValue;
+  if (currentState === ServerState.STOPPING || currentState === ServerState.ERROR) {
+    setState(ServerState.OFF);
+  }
 
   return { message: 'Server stopped' };
 }
@@ -492,7 +553,8 @@ export async function restartServer(): Promise<{ message: string }> {
 
   await new Promise((r) => setTimeout(r, 2000));
 
-  if (state === ServerState.OFF) {
+  const currentState: ServerStateValue = state as ServerStateValue;
+  if (currentState === ServerState.OFF) {
     const mapToStart = savedMap || (() => {
       const savesDir = resolveSavesDir();
       const saves = existsSync(savesDir)
@@ -532,7 +594,7 @@ export async function sendConsole(command: string): Promise<string> {
 }
 
 export function invalidateCache(): void {
-  closeRconPool();
+  closeRconManager();
 }
 
 export async function getSystemStats(): Promise<{
@@ -578,3 +640,23 @@ export async function getSystemStats(): Promise<{
 
   return { cpu_percent: cpuPercent, memory_percent: memoryPercent, disk_percent: diskPercent, online_players: onlinePlayers };
 }
+
+wsManager.onChannelSubscribe('server_state', (socket) => {
+  const payload = JSON.stringify({
+    channel: 'server_state',
+    data: {
+      state,
+      version: serverVersion,
+      saveName: currentSaveName,
+      configName: currentConfigName,
+      lastExitCode,
+      lastExitSignal,
+      lastExitError,
+      startTime: serverStartTime,
+    },
+    timestamp: Date.now(),
+  });
+  if (socket.readyState === 1) {
+    socket.send(payload);
+  }
+});

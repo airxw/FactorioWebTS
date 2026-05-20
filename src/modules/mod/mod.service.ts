@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync, mkdir
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { AppError } from '../../types/index.js';
+import { MAX_ZIP_FILE_SIZE, MAX_CONCURRENT_REQUESTS } from '../../config/constants.js';
 
 function getConfigDir(): string {
   return resolveConfigDir();
@@ -133,7 +134,7 @@ export function checkConflicts(modIds: number[]): ConflictResult[] {
   return conflicts;
 }
 
-const MAX_CONCURRENT_REQUESTS = 5;
+
 
 async function checkModUpdate(mod: { id: number; name: string; version: string }): Promise<{ id: number; hasUpdate: boolean } | null> {
   try {
@@ -230,7 +231,8 @@ interface ModInfoJson {
   dependencies?: string[];
 }
 
-const MAX_ZIP_FILE_SIZE = 100 * 1024 * 1024;
+
+
 const MAX_INFO_JSON_SIZE = 1024 * 1024;
 
 function readInfoJsonFromZip(zipPath: string): ModInfoJson | null {

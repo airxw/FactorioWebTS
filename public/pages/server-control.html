@@ -210,6 +210,7 @@
                         <button class="btn-control btn-start" id="btn-start" onclick="startServer()"><i class="bi bi-play-fill"></i>启动服务器</button>
                         <button class="btn-control btn-stop" id="btn-stop" onclick="stopServer()"><i class="bi bi-stop-fill"></i>停止服务器</button>
                         <button class="btn-control btn-restart" id="btn-restart" onclick="restartServer()"><i class="bi bi-arrow-repeat"></i>重启服务器</button>
+                        <button class="btn-control btn-save" id="btn-save" onclick="saveGame()"><i class="bi bi-save"></i>保存游戏</button>
                     </div>
                     <div class="alert-message" id="alert-message"></div>
                 </div>
@@ -335,6 +336,7 @@
     </div>
 
     <script src="/js/token-manager.js"></script>
+    <script src="/js/common.js"></script>
     <script src="/js/shared.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/app.js"></script>
@@ -345,6 +347,7 @@
     <script>
         var serverState = 'unknown';
         var isOperating = false;
+        var isRestarting = false;
         var statusRefreshTimer = null;
         var wsConnected = false;
         var autoScroll = true;
@@ -353,7 +356,7 @@
         var MAX_LOG_ENTRIES = 2000;
         var stateReceived = false;
 
-        var STATE_DISABLE_ALL = ['unknown', 'starting', 'stopping'];
+        var STATE_DISABLE_ALL = ['unknown', 'stopping'];
 
         function updateTime() {
             var now = new Date();
@@ -364,12 +367,14 @@
             var btnStart = document.getElementById('btn-start');
             var btnStop = document.getElementById('btn-stop');
             var btnRestart = document.getElementById('btn-restart');
+            var btnSave = document.getElementById('btn-save');
             var configCard = document.getElementById('startup-config-card');
 
             if (!stateReceived) {
                 btnStart.disabled = true;
                 btnStop.disabled = true;
                 btnRestart.disabled = true;
+                if (btnSave) btnSave.disabled = true;
                 if (configCard) configCard.classList.add('disabled');
                 return;
             }
@@ -378,6 +383,7 @@
                 btnStart.disabled = true;
                 btnStop.disabled = true;
                 btnRestart.disabled = true;
+                if (btnSave) btnSave.disabled = true;
                 return;
             }
 
@@ -385,14 +391,22 @@
                 btnStart.disabled = true;
                 btnStop.disabled = true;
                 btnRestart.disabled = true;
+                if (btnSave) btnSave.disabled = true;
+            } else if (serverState === 'starting') {
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                btnRestart.disabled = true;
+                if (btnSave) btnSave.disabled = true;
             } else if (serverState === 'off' || serverState === 'error') {
                 btnStart.disabled = false;
-                btnStop.disabled = true;
+                btnStop.disabled = false;
                 btnRestart.disabled = true;
+                if (btnSave) btnSave.disabled = true;
             } else if (serverState === 'running') {
                 btnStart.disabled = true;
                 btnStop.disabled = false;
                 btnRestart.disabled = false;
+                if (btnSave) btnSave.disabled = false;
             }
 
             if (serverState === 'off' || serverState === 'error') {
@@ -419,15 +433,17 @@
                     showConsolePanelWebSocket();
                     updateStatusBanner('online', '<i class="bi bi-check-circle-fill"></i> <strong>服务器在线</strong>' + (data.version ? ' — 版本 ' + data.version : ''));
                     showLoadingOverlay(false);
+                    isRestarting = false;
                     setOperating(false);
                     break;
                 case 'starting':
                     showConsolePanel();
                     showConsolePanelWebSocket();
                     updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong>');
+                    showLoadingOverlay(false);
                     break;
                 case 'stopping':
-                    updateStatusBanner('stopped', '<i class="bi bi-hourglass-split"></i> <strong>正在停止...</strong>');
+                    updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>正在停止...</strong>');
                     break;
                 case 'off':
                     if (data.lastExitCode !== null && data.lastExitCode !== 0 && data.lastExitError) {
@@ -436,11 +452,14 @@
                         updateStatusBanner('', '');
                     }
                     showLoadingOverlay(false);
-                    setOperating(false);
+                    if (!isRestarting) {
+                        setOperating(false);
+                    }
                     break;
                 case 'error':
                     updateStatusBanner('stopped', '<i class="bi bi-exclamation-triangle-fill"></i> <strong>服务器错误</strong> — ' + (data.lastExitError || '未知错误'));
                     showLoadingOverlay(false);
+                    isRestarting = false;
                     setOperating(false);
                     break;
                 default:
@@ -474,7 +493,7 @@
             var badge = document.getElementById('server-status-badge');
             var text = document.getElementById('server-status-text');
             badge.className = 'status-badge ' + status;
-            var statusMap = { 'online': '在线', 'offline': '离线', 'starting': '启动中...', 'stopping': '停止中...', 'unknown': '未知', 'running': '在线', 'error': '异常' };
+            var statusMap = { 'online': '在线', 'offline': '离线', 'off': '离线', 'starting': '启动中...', 'stopping': '停止中...', 'unknown': '未知', 'running': '在线', 'error': '异常' };
             text.textContent = statusMap[status] || '未知';
         }
 
@@ -631,35 +650,41 @@
             }
         }
 
+        var wsInitialized = false;
+
         function connectWebSocket() {
-            loadRecentLogs();
+            if (!wsInitialized) {
+                loadRecentLogs();
 
-            wsClient.on('open', function() {
-                wsConnected = true;
-                updateConsoleBadge('online', '已连接');
-            });
+                wsClient.on('open', function() {
+                    wsConnected = true;
+                    updateConsoleBadge('online', '已连接');
+                });
 
-            wsClient.on('server_state', function(data) {
-                onServerStateMessage(data);
-            });
+                wsClient.subscribe('server_state', function(data) {
+                    onServerStateMessage(data);
+                });
 
-            wsClient.subscribe('log', function(entry) {
-                if (entry) appendConsoleLog(entry);
-            });
+                wsClient.subscribe('log', function(entry) {
+                    if (entry) appendConsoleLog(entry);
+                });
 
-            wsClient.on('close', function() {
-                wsConnected = false;
-                updateConsoleBadge('offline', '已断开');
-            });
+                wsClient.on('close', function() {
+                    wsConnected = false;
+                    updateConsoleBadge('offline', '已断开');
+                });
 
-            wsClient.on('error', function() {
-                wsConnected = false;
-                updateConsoleBadge('offline', '连接错误');
-            });
+                wsClient.on('error', function() {
+                    wsConnected = false;
+                    updateConsoleBadge('offline', '连接错误');
+                });
 
-            wsClient.on('reconnecting', function() {
-                updateConsoleBadge('reconnecting', '重连中...');
-            });
+                wsClient.on('reconnecting', function() {
+                    updateConsoleBadge('reconnecting', '重连中...');
+                });
+
+                wsInitialized = true;
+            }
 
             if (!wsClient.connected) {
                 updateConsoleBadge('reconnecting', '连接中...');
@@ -735,13 +760,18 @@
                 setTimeout(function() {
                     select.innerHTML = '';
                     if (versions && versions.length > 0) {
-                        versions.forEach(function(ver) {
-                            var opt = document.createElement('option');
-                            opt.value = ver.version;
-                            opt.textContent = ver.version;
-                            if (stored.version === ver.version) opt.selected = true;
-                            select.appendChild(opt);
-                        });
+                        var installedVersions = versions.filter(function(ver) { return ver.is_installed; });
+                        if (installedVersions.length > 0) {
+                            installedVersions.forEach(function(ver) {
+                                var opt = document.createElement('option');
+                                opt.value = ver.version;
+                                opt.textContent = ver.version;
+                                if (stored.version === ver.version) opt.selected = true;
+                                select.appendChild(opt);
+                            });
+                        } else {
+                            select.innerHTML = '<option value="">没有已安装的版本</option>';
+                        }
                         if (stored.version) setTimeout(function() { loadMaps(stored.version); }, 100);
                     } else {
                         select.innerHTML = '<option value="">没有可用版本</option>';
@@ -855,19 +885,21 @@
                         });
                         var result = await res.json();
                         if (result.success) {
+                            showLoadingOverlay(false);
+                            setOperating(false);
                             showAlert('启动请求已发送: ' + (result.data && result.data.message || ''), 'success');
                             try { localStorage.setItem('server_running', 'true'); } catch(e) {}
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
                         } else {
                             showAlert(result.error || '启动失败', 'error');
-                            updateStatusBadge('offline');
+                            updateStatusBadge('error');
                             updateStatusBanner('', '');
                             showLoadingOverlay(false);
                             setOperating(false);
                         }
                     } catch (err) {
                         showAlert('启动请求失败: ' + err.message, 'error');
-                        updateStatusBadge('offline');
+                        updateStatusBadge('error');
                         updateStatusBanner('', '');
                         showLoadingOverlay(false);
                         setOperating(false);
@@ -881,7 +913,7 @@
                 showAlert('服务端状态未就绪，无法停止。', 'error');
                 return;
             }
-            if (serverState !== 'running') {
+            if (serverState !== 'running' && serverState !== 'starting' && serverState !== 'error') {
                 showAlert('服务器当前不在运行状态: ' + serverState, 'error');
                 return;
             }
@@ -898,7 +930,8 @@
                         var result = await res.json();
                         if (result.success) {
                             showAlert('停止命令已发送: ' + (result.data && result.data.message || ''), 'success');
-                            try { localStorage.setItem('server_running', 'false'); } catch(e) {}
+                            showLoadingOverlay(false);
+                            setOperating(false);
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
                         } else {
                             showAlert(result.error || '停止失败', 'error');
@@ -927,6 +960,7 @@
                 title: '确认', content: '确定要重启服务器吗？重启过程可能需要几十秒。', confirmText: '确认重启', danger: true,
                 onConfirm: async function() {
                     setOperating(true);
+                    isRestarting = true;
                     showLoadingOverlay(true);
                     updateStatusBadge('stopping');
                     showConsolePanel();
@@ -942,16 +976,36 @@
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
                         } else {
                             showAlert(result.error || '重启失败', 'error');
+                            isRestarting = false;
                             showLoadingOverlay(false);
                             setOperating(false);
                         }
                     } catch (err) {
                         showAlert('重启失败: ' + err.message, 'error');
+                        isRestarting = false;
                         showLoadingOverlay(false);
                         setOperating(false);
                     }
                 }
             });
+        }
+
+        async function saveGame() {
+            if (!stateReceived || serverState !== 'running') {
+                showAlert('服务器未在运行，无法保存', 'error');
+                return;
+            }
+            try {
+                var res = await fetchAPI('/api/server/save', { method: 'POST' });
+                var result = await res.json();
+                if (result.success) {
+                    showAlert('游戏已保存', 'success');
+                } else {
+                    showAlert(result.error || '保存失败', 'error');
+                }
+            } catch (err) {
+                showAlert('保存请求失败: ' + err.message, 'error');
+            }
         }
 
         function openUploadModal() { document.getElementById('upload-modal').classList.add('show'); }

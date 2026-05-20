@@ -413,6 +413,18 @@ function ensureSchema(database: Database.Database): void {
     `,
   });
 
+  migrations.push({
+    name: '024_create_indexes',
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_mods_name ON mods(name);
+      CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+      CREATE INDEX IF NOT EXISTS idx_votes_status ON votes(status);
+      CREATE INDEX IF NOT EXISTS idx_player_histories_player ON player_histories(player_name);
+      CREATE INDEX IF NOT EXISTS idx_gift_claims_player_type ON gift_claims(player_name, gift_type);
+    `,
+  });
+
   for (const migration of migrations) {
     if (!appliedSet.has(migration.name)) {
       database.exec(migration.sql);

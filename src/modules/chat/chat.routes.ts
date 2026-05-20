@@ -146,4 +146,19 @@ export default async function chatRoutes(app: FastifyInstance) {
     service.savePlayerEvent(parsed.data);
     return reply.send({ success: true, message: 'Player event config saved' });
   });
+
+  app.get('/api/chat/first-join-players', { preHandler: [authenticate, requireAdmin] }, async (_request, reply) => {
+    return reply.send({ success: true, data: service.listFirstJoinPlayers() });
+  });
+
+  app.delete('/api/chat/first-join-players/:playerName', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
+    const { playerName } = request.params as { playerName: string };
+    try {
+      const result = service.resetFirstJoinPlayer(playerName);
+      return reply.send({ success: true, data: result, message: '已重置首次登陆状态' });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
+  });
 }

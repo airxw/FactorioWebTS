@@ -5768,6 +5768,14 @@ textarea.form-control {
   box-shadow: 0 4px 16px rgba(245, 158, 11, 0.45);
 }
 
+.btn-save {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+.btn-save:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.45);
+}
+
 .alert-message {
   display: none;
   padding: 10px 16px;

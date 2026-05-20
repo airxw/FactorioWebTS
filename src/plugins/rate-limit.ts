@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { RATE_LIMIT_STRICT_MAX, RATE_LIMIT_STRICT_WINDOW_MS, RATE_LIMIT_DEFAULT_MAX, RATE_LIMIT_DEFAULT_WINDOW_MS } from '../config/constants.js';
 
 interface RateLimitEntry {
   count: number;
@@ -11,8 +12,8 @@ const stores = {
 };
 
 const LIMITS = {
-  strict: { max: 10, windowMs: 60_000 },
-  default: { max: 100, windowMs: 60_000 },
+  strict: { max: RATE_LIMIT_STRICT_MAX, windowMs: RATE_LIMIT_STRICT_WINDOW_MS },
+  default: { max: RATE_LIMIT_DEFAULT_MAX, windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS },
 };
 
 const STRICT_PATHS = new Set<string>([

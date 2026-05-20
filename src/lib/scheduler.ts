@@ -1,16 +1,10 @@
 import { getDb } from './database.js';
 import { sendGameCommand } from './game-command-bus.js';
-import { resolveLogPath } from './paths.js';
 import { logger } from './logger.js';
-import type {
-  DbPeriodicMessage,
-  DbTriggerResponse} from '../modules/chat/chat.repository.js';
-import {
-  listPeriodicMessages,
-  listTriggerResponses,
-} from '../modules/chat/chat.repository.js';
-import { processPlayerJoin, processPlayerLeave } from '../modules/chat/chat.service.js';
-import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import type { DbPeriodicMessage, DbTriggerResponse } from '../modules/chat/chat.repository.js';
+import { listPeriodicMessages, listTriggerResponses } from '../modules/chat/chat.repository.js';
+import { SCHEDULER_PERIODIC_INTERVAL } from '../config/constants.js';
+import { eventBus, type EventKey, type EventMap } from './event-bus.js';
 
 interface PeriodicMessageState {
   id: number;
@@ -18,21 +12,20 @@ interface PeriodicMessageState {
   lastSent: number;
 }
 
+type EventHandler = { event: EventKey; handler: (payload: any) => void };
+
 export class Scheduler {
   private timers: NodeJS.Timeout[] = [];
   private running = false;
   private periodicStates: Map<number, PeriodicMessageState> = new Map();
-  private logPosition = 0;
-  private logFilePath = '';
+  private eventHandlers: EventHandler[] = [];
 
   start(): void {
     if (this.running) return;
     this.running = true;
 
-    this.logFilePath = resolveLogPath();
-
     this.startPeriodicMessages();
-    this.startChatLogMonitor();
+    this.subscribeToEvents();
   }
 
   stop(): void {
@@ -42,13 +35,59 @@ export class Scheduler {
     }
     this.timers = [];
     this.periodicStates.clear();
+
+    for (const { event, handler } of this.eventHandlers) {
+      eventBus.off(event, handler);
+    }
+    this.eventHandlers = [];
+  }
+
+  private subscribeToEvents(): void {
+    const chatHandler = (payload: EventMap['log:chat']) => {
+      this.handleChatEvent(payload);
+    };
+    eventBus.on('log:chat', chatHandler);
+    this.eventHandlers.push({ event: 'log:chat', handler: chatHandler });
+  }
+
+  private async handleChatEvent(data: { player: string; message: string }): Promise<void> {
+    let triggers: DbTriggerResponse[];
+    try {
+      const db = getDb();
+      triggers = listTriggerResponses(db).filter((t) => t.enabled === 1);
+    } catch (e) {
+      logger.warn({ err: e }, '[Scheduler] Failed to load trigger responses');
+      return;
+    }
+
+    if (triggers.length === 0) return;
+
+    for (const trigger of triggers) {
+      const matched =
+        trigger.case_sensitive === 1
+          ? data.message.includes(trigger.trigger_text)
+          : data.message.toLowerCase().includes(trigger.trigger_text.toLowerCase());
+
+      if (!matched) continue;
+
+      const response = trigger.response_text.replace(/\{player\}/g, data.player);
+      const cmd = response.startsWith('/w ') || response.startsWith('/whisper ')
+        ? response
+        : `/w ${data.player} ${response}`;
+
+      const result = await sendGameCommand(cmd);
+      if (!result.ok) {
+        logger.warn({ response, player: data.player, err: result.error }, '[Scheduler] Auto-response failed');
+      }
+      break;
+    }
   }
 
   private startPeriodicMessages(): void {
     const timer = setInterval(() => {
       if (!this.running) return;
       this.processPeriodicMessages();
-    }, 1000);
+    }, SCHEDULER_PERIODIC_INTERVAL);
     this.timers.push(timer);
   }
 
@@ -57,7 +96,8 @@ export class Scheduler {
     try {
       const db = getDb();
       messages = listPeriodicMessages(db).filter((m) => m.enabled === 1);
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, '[Scheduler] Failed to load periodic messages');
       return;
     }
 
@@ -117,135 +157,6 @@ export class Scheduler {
     const result = await sendGameCommand(command);
     if (!result.ok) {
       logger.warn({ command, err: result.error }, '[Scheduler] Periodic message send failed');
-    }
-  }
-
-  private startChatLogMonitor(): void {
-    this.initLogPosition();
-
-    const timer = setInterval(() => {
-      if (!this.running) return;
-      this.checkLogForNewChat();
-    }, 5000);
-    this.timers.push(timer);
-  }
-
-  private initLogPosition(): void {
-    try {
-      if (existsSync(this.logFilePath)) {
-        const st = statSync(this.logFilePath);
-        this.logPosition = st.size;
-      }
-    } catch {}
-  }
-
-  private checkLogForNewChat(): void {
-    let triggers: DbTriggerResponse[];
-    try {
-      const db = getDb();
-      triggers = listTriggerResponses(db).filter((t) => t.enabled === 1);
-    } catch {
-      return;
-    }
-
-    try {
-      if (!existsSync(this.logFilePath)) return;
-
-      const st = statSync(this.logFilePath);
-      if (st.size < this.logPosition) {
-        this.logPosition = 0;
-      }
-      if (st.size <= this.logPosition) return;
-
-      const bytesToRead = st.size - this.logPosition;
-      const buffer = Buffer.alloc(bytesToRead);
-
-      let fd: number | undefined;
-      try {
-        fd = openSync(this.logFilePath, 'r');
-        readSync(fd, buffer, 0, bytesToRead, this.logPosition);
-      } finally {
-        if (fd !== undefined) closeSync(fd);
-      }
-
-      this.logPosition = st.size;
-
-      const content = buffer.toString('utf-8');
-      const lines = content.split('\n').filter((l) => l.trim());
-
-      for (const line of lines) {
-        if (line.includes('[CHAT]')) {
-          if (triggers.length === 0) continue;
-          const chatData = this.parseChatLine(line);
-          if (!chatData) continue;
-          this.matchAndRespond(chatData.player, chatData.message, triggers);
-        } else if (line.includes('joined the game')) {
-          const playerName = this.parsePlayerNameFromEvent(line);
-          if (playerName) {
-            processPlayerJoin(playerName);
-          }
-        } else if (line.includes('left the game')) {
-          const playerName = this.parsePlayerNameFromEvent(line);
-          if (playerName) {
-            processPlayerLeave(playerName);
-          }
-        }
-      }
-    } catch {}
-  }
-
-  private parsePlayerNameFromEvent(line: string): string | null {
-    const joinMatch = line.match(/(\S+)\s+joined the game/);
-    if (joinMatch) return joinMatch[1];
-
-    const leaveMatch = line.match(/(\S+)\s+left the game/);
-    if (leaveMatch) return leaveMatch[1];
-
-    return null;
-  }
-
-  private parseChatLine(line: string): { player: string; message: string } | null {
-    const chatIndex = line.indexOf('[CHAT]');
-    if (chatIndex === -1) return null;
-
-    const afterChat = line.substring(chatIndex + 6).trim();
-
-    const angleMatch = afterChat.match(/^<([^>]+)>\s*(.*)/);
-    if (angleMatch) {
-      return { player: angleMatch[1], message: angleMatch[2] };
-    }
-
-    const colonMatch = afterChat.match(/^([^:]+):\s*(.*)/);
-    if (colonMatch) {
-      return { player: colonMatch[1], message: colonMatch[2] };
-    }
-
-    return null;
-  }
-
-  private async matchAndRespond(
-    player: string,
-    chatMessage: string,
-    triggers: DbTriggerResponse[],
-  ): Promise<void> {
-    for (const trigger of triggers) {
-      const matched =
-        trigger.case_sensitive === 1
-          ? chatMessage.includes(trigger.trigger_text)
-          : chatMessage.toLowerCase().includes(trigger.trigger_text.toLowerCase());
-
-      if (!matched) continue;
-
-      const response = trigger.response_text.replace(/\{player\}/g, player);
-      const cmd = response.startsWith('/w ') || response.startsWith('/whisper ')
-        ? response
-        : `/w ${player} ${response}`;
-
-      const result = await sendGameCommand(cmd);
-      if (!result.ok) {
-        logger.warn({ response, player, err: result.error }, '[Scheduler] Auto-response failed');
-      }
-      break;
     }
   }
 }

@@ -25,8 +25,13 @@ export default async function serverRoutes(app: FastifyInstance) {
 
   app.post('/api/server/start', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { version, map, config } = (request.body as { version?: string; map?: string; config?: string }) || {};
-    const result = await service.startServer(version, map, config);
-    return reply.send({ success: true, data: result });
+    try {
+      const result = await service.startServer(version, map, config);
+      return reply.send({ success: true, data: result });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
   });
 
   app.post('/api/server/stop', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {

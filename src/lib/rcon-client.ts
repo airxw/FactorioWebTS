@@ -36,6 +36,7 @@ export class RconConnection {
   private pending = new Map<number, PendingCommand>();
   private writeQueue: Array<{ packet: Buffer; requestId: number }> = [];
   private writing = false;
+  private onCloseCallback: (() => void) | null = null;
 
   constructor(
     host: string,
@@ -91,6 +92,7 @@ export class RconConnection {
 
       socket.on('close', () => {
         this.rejectAllPending(rconErr('DISCONNECTED', 'Connection closed'));
+        if (this.onCloseCallback) this.onCloseCallback();
       });
     });
   }
@@ -327,6 +329,10 @@ export class RconConnection {
 
   isConnected(): boolean {
     return this.socket !== null && !this.socket.destroyed && this.socket.readyState === 'open';
+  }
+
+  setOnClose(cb: (() => void) | null): void {
+    this.onCloseCallback = cb;
   }
 
   disconnect(): void {

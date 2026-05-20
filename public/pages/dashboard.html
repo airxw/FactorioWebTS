@@ -6,10 +6,191 @@
     <title>FactorioWeb - 控制台</title>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/bootstrap-icons.css">
-    <script src="/js/htmx.min.js"></script>
-    <script src="/js/alpine.min.js" defer></script>
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-lg, 20px);
+        }
+        .dashboard-grid .card-full {
+            grid-column: 1 / -1;
+        }
+        @media (max-width: 900px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .status-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .status-row .status-indicator {
+            font-size: 15px;
+            padding: 10px 20px;
+        }
+        .status-row .status-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            color: var(--color-text-secondary, #666);
+            font-size: 0.9rem;
+        }
+        .status-row .status-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .status-pending {
+            background-color: rgba(243, 156, 18, 0.12);
+            color: #856404;
+            border: 1px solid rgba(243, 156, 18, 0.25);
+        }
+        .status-pending::before {
+            background-color: var(--warning-color, #f39c12);
+            animation: pulse 1.5s infinite;
+        }
+
+        .version-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-md, 12px);
+            flex-wrap: wrap;
+        }
+        .version-summary-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .version-summary-left .ver-label {
+            font-size: 0.85rem;
+            color: var(--color-text-secondary, #666);
+        }
+        .version-summary-left .ver-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--primary-color, #3498db);
+        }
+        .version-summary-left .ver-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .ver-badge.badge-success { background: rgba(39,174,96,0.15); color: #27ae60; }
+        .ver-badge.badge-warning { background: rgba(243,156,18,0.15); color: #d35400; }
+        .ver-badge.badge-danger  { background: rgba(231,76,60,0.15);  color: #e74c3c; }
+
+        .update-section {
+            padding: var(--spacing-md, 12px) var(--spacing-lg, 20px);
+            background: linear-gradient(135deg, rgba(52,152,219,0.04) 0%, rgba(46,204,113,0.03) 100%);
+            border-radius: 10px;
+            border: 1px solid var(--color-border, #e0e0e0);
+            margin-top: var(--spacing-md, 12px);
+            text-align: center;
+        }
+        .update-section:empty { display: none; }
+        .update-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 500;
+            margin-bottom: var(--spacing-sm, 8px);
+        }
+        .update-badge.badge-warning {
+            background: rgba(243,156,18,0.12);
+            color: #d35400;
+            border: 1px solid rgba(243,156,18,0.25);
+        }
+        .update-badge.badge-success {
+            background: rgba(39,174,96,0.12);
+            color: #27ae60;
+            border: 1px solid rgba(39,174,96,0.25);
+        }
+        .update-badge.badge-danger {
+            background: rgba(231,76,60,0.12);
+            color: #e74c3c;
+            border: 1px solid rgba(231,76,60,0.25);
+        }
+        .update-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .update-btn {
+            min-width: 180px;
+            justify-content: center;
+            padding: 10px 20px;
+            font-size: 0.9rem;
+        }
+        .update-btn i { font-size: 1rem; }
+        @media (max-width: 600px) {
+            .update-btn { min-width: 100%; }
+        }
+
+        .version-empty-hint {
+            text-align: center;
+            padding: var(--spacing-xl, 32px) var(--spacing-lg, 20px);
+            color: var(--color-text-secondary, #999);
+        }
+        .version-empty-hint i {
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 8px;
+            color: var(--color-text-secondary, #bbb);
+        }
+
+        .install-progress {
+            margin-top: var(--spacing-md, 12px);
+            padding: var(--spacing-md, 12px) var(--spacing-lg, 20px);
+            background: rgba(52,152,219,0.06);
+            border-radius: 10px;
+            border: 1px solid rgba(52,152,219,0.2);
+        }
+        .install-progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .install-progress-status {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--primary-color, #3498db);
+        }
+        .install-progress-percent {
+            font-size: 0.85rem;
+            color: var(--color-text-secondary, #666);
+        }
+        .install-progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(0,0,0,0.08);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .install-progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            transition: width 0.5s ease;
+        }
+        .install-progress-fill.failed {
+            background: #e74c3c;
+        }
+        .install-progress-fill.done {
+            background: #2ecc71;
+        }
+    </style>
 </head>
-<body class="dashboard-page" x-data="dashboardApp()" x-init="init()" @refresh-requested.window="refreshAll()">
+<body class="dashboard-page" x-data="createPageApp(dashboardApp())" x-init="init()" @refresh-requested.window="refreshAll()">
     <div class="app-container">
         <aside class="sidebar" id="sidebar"></aside>
 
@@ -30,75 +211,76 @@
                 </div>
             </nav>
 
-            <div class="page-content stagger-children">
-                <div class="card">
-                    <div class="card-header"><h2 class="card-title">服务端状态</h2></div>
-                    <div class="card-body">
-                        <div class="status-card-content">
-                            <div class="status-display">
-                                <div class="status-info">
-                                    <div id="server-status" class="status-indicator" :class="statusClass" x-text="serverStatus"></div>
-                                    <div class="status-version" x-text="'版本: ' + (serverVersion || '未知')"></div>
-                                </div>
-                                <div class="status-actions" x-show="isAdmin">
-                                    <button class="btn btn-primary" @click="startServer()" :disabled="!canStart()">
-                    <i class="bi bi-play-fill"></i> 启动
-                </button>
-                <button class="btn btn-danger" @click="stopServer()" :disabled="!canStop()">
-                    <i class="bi bi-stop-fill"></i> 停止
-                </button>
-                <button class="btn btn-secondary" @click="saveGame()" :disabled="!canSave()">
-                    <i class="bi bi-save"></i> 保存
-                </button>
+            <div class="page-content">
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h2 class="card-title"><i class="bi bi-hdd-rack"></i> 服务端状态</h2>
+                            <a href="server-control.html" class="btn btn-sm btn-primary" x-show="isAdmin">
+                                <i class="bi bi-gear"></i> 服务器控制
+                            </a>
+                        </div>
+                        <div class="card-body">
+                            <div class="status-row">
+                                <div class="status-indicator" :class="statusClass" x-text="serverStatus"></div>
+                                <div class="status-meta">
+                                    <span><i class="bi bi-tag"></i> <span x-text="serverVersion || '未知'"></span></span>
+                                    <span x-show="serverState === 'running'"><i class="bi bi-people"></i> <span x-text="playerCount + ' 在线'"></span></span>
+                                    <span x-show="serverState === 'running'"><i class="bi bi-clock"></i> <span x-text="uptimeText"></span></span>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title">当前版本信息</h3>
-                        <button class="btn btn-sm btn-primary" @click="checkVersion()">
-                            <i class="bi bi-arrow-clockwise"></i> 检查更新
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div class="version-info-card">
-                            <div class="version-display">
-                                <div class="version-item">
-                                    <div class="version-item-label">当前版本</div>
-                                    <div class="version-item-value" x-text="currentVersion"></div>
-                                </div>
-                                <div class="version-item">
-                                    <div class="version-item-label">状态</div>
-                                    <div class="version-item-badge" x-text="versionStatusText" :class="versionStatusClass"></div>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h3 class="card-title"><i class="bi bi-box-seam"></i> 当前版本</h3>
+                            <button class="btn btn-sm btn-outline-secondary" @click="checkVersion()">
+                                <i class="bi bi-arrow-clockwise"></i> 检查更新
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="version-summary">
+                                <div class="version-summary-left">
+                                    <span class="ver-label">版本</span>
+                                    <span class="ver-value" x-text="currentVersion"></span>
+                                    <span class="ver-badge" x-text="versionStatusText" :class="versionStatusClass"></span>
                                 </div>
                             </div>
                             <div class="update-section" x-html="versionInfo"></div>
+                            <div class="install-progress" x-show="installingVersion">
+                                <div class="install-progress-header">
+                                    <span class="install-progress-status" x-text="installStatusText"></span>
+                                    <span class="install-progress-percent" x-text="installProgress + '%'"></span>
+                                </div>
+                                <div class="install-progress-bar">
+                                    <div class="install-progress-fill" :class="{ 'failed': installFailed, 'done': installProgress >= 100 }" :style="'width: ' + installProgress + '%'"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title">已安装版本列表</h3>
-                        <button class="btn btn-sm btn-secondary" @click="loadVersionList()">
-                            <i class="bi bi-arrow-clockwise"></i> 刷新
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div class="version-list-table">
-                            <div class="table-responsive">
+                    <div class="card card-full">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h3 class="card-title"><i class="bi bi-layers"></i> 已安装版本</h3>
+                            <button class="btn btn-sm btn-outline-secondary" @click="loadVersionList()">
+                                <i class="bi bi-arrow-clockwise"></i> 刷新
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div x-show="!versionsLoaded" class="version-empty-hint">
+                                <i class="bi bi-hourglass-split"></i>
+                                <p>加载中...</p>
+                            </div>
+                            <div x-show="versionsLoaded && versions.length === 0" class="version-empty-hint">
+                                <i class="bi bi-box-seam"></i>
+                                <p>暂无安装的版本</p>
+                                <p><small>请前往<a href="server-control.html">服务器控制</a>页面安装版本</small></p>
+                            </div>
+                            <div x-show="versionsLoaded && versions.length > 0" class="table-responsive">
                                 <table class="table">
                                     <thead><tr><th>版本号</th><th>类型</th><th>安装日期</th><th>状态</th><th x-show="isAdmin">操作</th></tr></thead>
-                                    <tbody id="version-list-body">
-                                        <tr x-show="!versionsLoaded" class="loading-state">
-                                            <td colspan="5" class="text-center">加载中...</td>
-                                        </tr>
-                                        <tr x-show="versionsLoaded && versions.length === 0" class="empty-state">
-                                            <td colspan="5" class="text-center">暂无安装的版本</td>
-                                        </tr>
+                                    <tbody>
                                         <template x-for="v in versions" :key="v.version">
                                             <tr>
                                                 <td><span class="version-tag" :class="{ 'version-current': v.is_current }" x-text="v.version"></span></td>
@@ -109,13 +291,13 @@
                                                 </td>
                                                 <td x-show="isAdmin">
                                                     <div class="table-actions">
-                                                        <button class="btn btn-sm btn-primary" @click="setDefault(v.version)" x-show="!v.is_current">
+                                                        <button class="btn btn-sm btn-primary" @click="setDefault(v.version)" x-show="!v.is_current && v.is_installed">
                                                             <i class="bi bi-check"></i> 设为默认
                                                         </button>
                                                         <button class="btn btn-sm btn-warning" @click="verifyVer(v.version)">
                                                             <i class="bi bi-shield-check"></i> 验证
                                                         </button>
-                                                        <button class="btn btn-sm btn-danger" @click="deleteVer(v.version)" x-show="!v.is_current">
+                                                        <button class="btn btn-sm btn-danger" @click="deleteVer(v.version)" x-show="!v.is_current || !v.is_installed">
                                                             <i class="bi bi-trash"></i> 删除
                                                         </button>
                                                     </div>
@@ -140,6 +322,8 @@
     <script src="/js/modal.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/sidebar-menu.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/common.js"></script>
     <script>
     function dashboardApp() {
       return {
@@ -147,7 +331,6 @@
         serverStatus: '加载中...',
         serverVersion: '',
         isRunning: false,
-        isOperating: false,
         isAdmin: false,
         currentVersion: '未知',
         versionStatusText: '未知',
@@ -155,10 +338,16 @@
         versionInfo: '',
         versions: [],
         versionsLoaded: false,
-        installVersionInp: '',
         latestVersion: null,
         statusClass: 'status-loading',
         stateReceived: false,
+        playerCount: 0,
+        uptimeText: '',
+        installingVersion: '',
+        installProgress: 0,
+        installStatusText: '',
+        installFailed: false,
+        _installPollTimer: null,
 
         init() {
           window.__dashboardInstance = this;
@@ -182,6 +371,7 @@
           if (!data || !data.state) return;
           this.stateReceived = true;
           this.serverState = data.state;
+          if (data.version) this.serverVersion = data.version;
           this.updateStatus();
         },
 
@@ -198,7 +388,7 @@
         },
 
         serverStateText() {
-          const map = {
+          var map = {
             unknown: '加载中...', off: '已停止', starting: '启动中...', running: '运行中', stopping: '停止中...', error: '异常'
           };
           return map[this.serverState] || '未知';
@@ -211,20 +401,17 @@
           return 'status-offline';
         },
 
-        canStart(): boolean {
-          if (!this.stateReceived) return false;
-          if (this.isOperating) return false;
-          return this.serverState === 'off' || this.serverState === 'error';
-        },
-
-        canStop(): boolean {
-          if (!this.stateReceived) return false;
-          if (this.isOperating) return false;
-          return this.serverState === 'running';
-        },
-
-        canSave(): boolean {
-          return this.canStop();
+        formatUptime(seconds) {
+          if (!seconds || seconds <= 0) return '';
+          var d = Math.floor(seconds / 86400);
+          var h = Math.floor((seconds % 86400) / 3600);
+          var m = Math.floor((seconds % 3600) / 60);
+          var parts = [];
+          if (d > 0) parts.push(d + '天');
+          if (h > 0) parts.push(h + '时');
+          if (m > 0) parts.push(m + '分');
+          if (parts.length === 0) parts.push(Math.floor(seconds) + '秒');
+          return parts.join(' ');
         },
 
         checkAuth() {
@@ -265,8 +452,10 @@
             if (data.success && data.data) {
               this.serverState = data.data.state || 'unknown';
               this.stateReceived = true;
-              this.updateStatus();
               this.serverVersion = data.data.version || '';
+              this.playerCount = data.data.playerCount || 0;
+              this.uptimeText = this.formatUptime(data.data.uptime);
+              this.updateStatus();
             }
           } catch(e) { /* ignore */ }
         },
@@ -276,22 +465,24 @@
             var res = await fetch('/api/versions/current', { headers: this.authHeaders() });
             var data = await res.json();
             if (data.success && data.data) {
-              this.currentVersion = data.data.version || '未知';
-              if (data.data.installed_at && data.data.installed_at > 0) {
+              var v = data.data;
+              if (v.version && v.version !== '') {
+                this.currentVersion = v.version;
                 this.versionStatusText = '已安装';
                 this.versionStatusClass = 'badge-success';
               } else {
+                this.currentVersion = '未安装';
                 this.versionStatusText = '未安装';
-                this.versionStatusClass = 'badge-danger';
+                this.versionStatusClass = 'badge-warning';
               }
             } else {
               this.currentVersion = '未知';
-              this.versionStatusText = '未知';
-              this.versionStatusClass = '';
+              this.versionStatusText = '获取失败';
+              this.versionStatusClass = 'badge-danger';
             }
-          } catch(e) { 
+          } catch(e) {
             this.currentVersion = '未知';
-            this.versionStatusText = '错误';
+            this.versionStatusText = '获取失败';
             this.versionStatusClass = 'badge-danger';
           }
         },
@@ -306,7 +497,7 @@
             } else {
               this.versions = [];
             }
-          } catch(e) { 
+          } catch(e) {
             this.versions = [];
           } finally {
             this.versionsLoaded = true;
@@ -319,163 +510,135 @@
             var data = await res.json();
             if (data.success && data.data) {
               this.latestVersion = data.data;
-              
-              var html = '';
-              
+
+              var hasInstalled = this.currentVersion && this.currentVersion !== '未安装' && this.currentVersion !== '未知';
               var hasAnyUpdate = data.data.stable.has_update || data.data.experimental.has_update;
-              
-              if (hasAnyUpdate) {
+              var html = '';
+
+              if (!hasInstalled) {
+                html += '<div class="update-badge badge-warning"><i class="bi bi-download"></i> 可安装版本</div>';
+              } else if (hasAnyUpdate) {
                 html += '<div class="update-badge badge-warning"><i class="bi bi-exclamation-triangle-fill"></i> 有可用更新</div>';
               } else {
                 html += '<div class="update-badge badge-success"><i class="bi bi-check-circle-fill"></i> 已是最新版本</div>';
               }
-              
+
               html += '<div class="update-buttons">';
-              
-              var stableBtnClass = data.data.stable.has_update ? 'btn-primary' : 'btn-success';
-              var stableText = data.data.stable.has_update ? '安装正式版 ' + data.data.stable.version : '正式版 ' + data.data.stable.version;
-              var stableDisabled = data.data.stable.has_update ? '' : 'disabled';
-              
-              html += '<button class="btn ' + stableBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'stable\')" ' + stableDisabled + '>'
-                + '<i class="bi bi-check-circle-fill"></i> ' + stableText
-                + '</button>';
-              
-              var experimentalBtnClass = data.data.experimental.has_update ? 'btn-warning' : 'btn-info';
-              var experimentalText = data.data.experimental.has_update ? '安装测试版 ' + data.data.experimental.version : '测试版 ' + data.data.experimental.version;
-              var experimentalDisabled = data.data.experimental.has_update ? '' : 'disabled';
-              
-              html += '<button class="btn ' + experimentalBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'experimental\')" ' + experimentalDisabled + '>'
-                + '<i class="bi bi-flask"></i> ' + experimentalText
-                + '</button>';
-              
+
+              var stableAvailable = data.data.stable.version && data.data.stable.version !== '';
+              if (stableAvailable) {
+                var stableNeedInstall = !hasInstalled || data.data.stable.has_update;
+                var stableBtnClass = stableNeedInstall ? 'btn-primary' : 'btn-success';
+                var stableText = stableNeedInstall ? '安装正式版 ' + data.data.stable.version : '正式版 ' + data.data.stable.version + '（已安装）';
+                var stableDisabled = stableNeedInstall ? '' : 'disabled';
+
+                html += '<button class="btn ' + stableBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'stable\')" ' + stableDisabled + '>'
+                  + '<i class="bi bi-check-circle-fill"></i> ' + stableText
+                  + '</button>';
+              }
+
+              var experimentalAvailable = data.data.experimental.version && data.data.experimental.version !== '';
+              if (experimentalAvailable) {
+                var expNeedInstall = !hasInstalled || data.data.experimental.has_update;
+                var expBtnClass = expNeedInstall ? 'btn-warning' : 'btn-info';
+                var expText = expNeedInstall ? '安装测试版 ' + data.data.experimental.version : '测试版 ' + data.data.experimental.version + '（已安装）';
+                var expDisabled = expNeedInstall ? '' : 'disabled';
+
+                html += '<button class="btn ' + expBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'experimental\')" ' + expDisabled + '>'
+                  + '<i class="bi bi-flask"></i> ' + expText
+                  + '</button>';
+              }
+
               html += '</div>';
-              
+
               this.versionInfo = html;
             }
-          } catch (e) { 
+          } catch (e) {
             this.versionInfo = '<div class="update-badge badge-danger"><i class="bi bi-x-circle-fill"></i> 检查更新失败</div>';
           }
         },
 
         async installVersionByType(releaseType) {
-          var version = releaseType === 'experimental' 
-            ? this.latestVersion?.experimental?.version 
-            : this.latestVersion?.stable?.version;
-            
+          var version = releaseType === 'experimental'
+            ? (this.latestVersion && this.latestVersion.experimental ? this.latestVersion.experimental.version : null)
+            : (this.latestVersion && this.latestVersion.stable ? this.latestVersion.stable.version : null);
+
           if (!version) {
             this.showToast('获取版本信息失败', 'error');
             return;
           }
-          
+
           var typeName = releaseType === 'experimental' ? '测试版' : '正式版';
           var confirmed = await window.showConfirm({ content: '确定要安装' + typeName + ' ' + version + ' 吗？' });
           if (!confirmed) return;
-          
+
           try {
+            var headers = Object.assign({}, this.authHeaders(), { 'Content-Type': 'application/json' });
             var res = await fetch('/api/versions/upgrade', {
               method: 'POST',
-              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
+              headers: headers,
               body: JSON.stringify({ target_version: version, release_type: releaseType })
             });
             var data = await res.json();
             if (data.success) {
-              this.showToast('版本安装中', 'success');
-              setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 3000);
+              this.installingVersion = version;
+              this.installProgress = 0;
+              this.installStatusText = '准备中...';
+              this.installFailed = false;
+              this.startPollProgress(version);
+              this.showToast('版本安装已启动', 'info');
             } else {
               this.showToast(data.error || '安装失败', 'error');
             }
           } catch(e) { this.showToast('网络错误', 'error'); }
         },
 
-        async startServer() {
-          if (!this.canStart()) {
-            this.showToast('当前状态不允许启动', 'error');
-            return;
-          }
-          this.isOperating = true;
-          try {
-            var res = await fetch('/api/server/start', {
-              method: 'POST',
-              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ version: this.currentVersion !== '未知' ? this.currentVersion : undefined })
-            });
-            var data = await res.json();
-            if (!data.success) {
-              this.showToast(data.error || '启动失败', 'error');
-              this.isOperating = false;
-              return;
-            }
-            
-            this.showToast('正在启动服务器...', 'info');
-          } catch(e) { 
-            this.showToast('启动失败: ' + (e.message || '未知错误'), 'error');
-            this.isOperating = false;
-          }
+        startPollProgress(version) {
+          if (this._installPollTimer) clearInterval(this._installPollTimer);
+          this.pollInstallProgress(version);
+          this._installPollTimer = setInterval(() => {
+            this.pollInstallProgress(version);
+          }, 2000);
         },
 
-        async stopServer() {
-          if (!this.canStop()) {
-            this.showToast('当前状态不允许停止', 'error');
-            return;
-          }
-          this.isOperating = true;
-          var confirmed = await window.showConfirm({ title: '停止服务器', content: '确定要停止服务器吗？', danger: true });
-          if (!confirmed) {
-            this.isOperating = false;
-            return;
-          }
-          try {
-            var res = await fetch('/api/server/stop', { method: 'POST', headers: this.authHeaders() });
-            var data = await res.json();
-            this.showToast(data.success ? '服务器已停止' : (data.error || '停止失败'), data.success ? 'success' : 'error');
-            this.loadServerStatus();
-            this.isOperating = false;
-          } catch(e) {
-            this.showToast('网络错误', 'error');
-            this.isOperating = false;
-          }
+        pollInstallProgress(version) {
+          fetch('/api/versions/progress?version=' + encodeURIComponent(version), { headers: this.authHeaders() })
+            .then(r => r.json())
+            .then(d => {
+              if (d.success && d.data) {
+                this.installProgress = d.data.progress || 0;
+                this.installStatusText = d.data.status || '';
+                if (d.data.progress >= 100) {
+                  this.stopPollProgress();
+                  this.showToast('版本安装完成', 'success');
+                  setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 1500);
+                  return;
+                }
+                if (d.data.status && d.data.status.indexOf('失败') >= 0) {
+                  this.installFailed = true;
+                  this.stopPollProgress();
+                  return;
+                }
+              }
+            })
+            .catch(function() {});
         },
 
-        async saveGame() {
-          if (!this.canSave()) {
-            this.showToast('当前状态不允许保存', 'error');
-            return;
+        stopPollProgress() {
+          if (this._installPollTimer) {
+            clearInterval(this._installPollTimer);
+            this._installPollTimer = null;
           }
-          try {
-            var res = await fetch('/api/server/save', { method: 'POST', headers: this.authHeaders() });
-            var data = await res.json();
-            this.showToast(data.success ? '游戏已保存' : (data.error || '保存失败'), data.success ? 'success' : 'error');
-          } catch(e) { this.showToast('网络错误', 'error'); }
-        },
-
-        async installVersion() {
-          if (!this.installVersionInp) { this.showToast('请输入版本号', 'warning'); return; }
-          var confirmed = await window.showConfirm({ content: '确定要安装版本 ' + this.installVersionInp + ' 吗？' });
-          if (!confirmed) return;
-          try {
-            var res = await fetch('/api/versions/upgrade', {
-              method: 'POST',
-              headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ target_version: this.installVersionInp, release_type: 'stable' })
-            });
-            var data = await res.json();
-            if (data.success) {
-              this.showToast('版本安装中', 'success');
-              this.installVersionInp = '';
-              setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 3000);
-            } else {
-              this.showToast(data.error || '安装失败', 'error');
-            }
-          } catch(e) { this.showToast('网络错误', 'error'); }
         },
 
         async setDefault(version) {
           var confirmed = await window.showConfirm({ content: '确定要将 ' + version + ' 设为默认版本吗？' });
           if (!confirmed) return;
           try {
+            var headers = Object.assign({}, this.authHeaders(), { 'Content-Type': 'application/json' });
             var res = await fetch('/api/versions/set-default', {
-              method: 'POST', headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ version })
+              method: 'POST', headers: headers,
+              body: JSON.stringify({ version: version })
             });
             var data = await res.json();
             this.showToast(data.success ? '默认版本已设置' : (data.error || '设置失败'), data.success ? 'success' : 'error');
@@ -498,12 +661,9 @@
           try {
             var res = await fetch('/api/versions/verify/' + encodeURIComponent(version), { headers: this.authHeaders() });
             var data = await res.json();
-            this.showToast(data.success && data.data?.valid ? '版本验证成功' : (data.data?.message || '验证失败'), data.data?.valid ? 'success' : 'error');
+            var valid = data.success && data.data && data.data.valid;
+            this.showToast(valid ? '版本验证成功' : (data.data && data.data.message ? data.data.message : '验证失败'), valid ? 'success' : 'error');
           } catch(e) { this.showToast('网络错误', 'error'); }
-        },
-
-        authHeaders() {
-          return { 'Authorization': 'Bearer ' + TokenManager.getToken() };
         },
 
         formatTs(ts) {
@@ -511,17 +671,9 @@
           return new Date(ts * 1000).toLocaleString('zh-CN');
         },
 
-        showToast(msg, type) {
-          var container = document.getElementById('toast-container');
-          var toast = document.createElement('div');
-          toast.className = 'toast-item toast-' + (type || 'info');
-          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
-          container.appendChild(toast);
-          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
-          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
-        }
       };
     }
     </script>
+    <script src="/js/alpine.min.js"></script>
 </body>
 </html>

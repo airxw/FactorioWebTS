@@ -7,9 +7,10 @@
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/bootstrap-icons.css">
     <script src="/js/htmx.min.js"></script>
+    <script src="/js/common.js"></script>
     <script src="/js/alpine.min.js" defer></script>
 </head>
-<body x-data="vipApp()" x-init="init()">
+<body x-data="createPageApp(vipApp())" x-init="init()">
     <div class="app-container">
         <aside class="sidebar" id="sidebar"></aside>
 
@@ -313,21 +314,6 @@
           return new Date(ts * 1000).toLocaleString('zh-CN');
         },
 
-        authHeaders(ct) {
-          var h = { 'Authorization': 'Bearer ' + TokenManager.getToken() };
-          if (ct) h['Content-Type'] = ct;
-          return h;
-        },
-
-        showToast(msg, type) {
-          var container = document.getElementById('toast-container');
-          var toast = document.createElement('div');
-          toast.className = 'toast-item toast-' + (type || 'info');
-          toast.innerHTML = '<div class="toast-body"><div class="toast-message">' + escapeHtml(msg) + '</div></div><button class="toast-close">&times;</button>';
-          container.appendChild(toast);
-          var timer = setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3000);
-          toast.querySelector('.toast-close').addEventListener('click', function() { clearTimeout(timer); toast.remove(); });
-        }
       };
     }
     </script>

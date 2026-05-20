@@ -95,9 +95,9 @@ function makeFooterButtons(confirmText, cancelText, danger, onConfirm, onCancel,
     var confirmBtn = document.createElement('button');
     confirmBtn.className = danger ? 'btn btn-danger' : 'btn btn-primary';
     confirmBtn.textContent = confirmText;
-    confirmBtn.onclick = function () {
+    confirmBtn.onclick = async function () {
         closeFn();
-        onConfirm();
+        await onConfirm();
     };
     footer.appendChild(confirmBtn);
 

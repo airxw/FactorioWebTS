@@ -7,6 +7,31 @@
     <title>FactorioWeb - 聊天设置</title>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/bootstrap-icons.css">
+    <style>
+        .fjp-table-wrapper { overflow-x: auto; }
+        .fjp-empty-hint { text-align: center; padding: 32px 16px; color: var(--gray-color); }
+        .fjp-empty-hint i { font-size: 32px; display: block; margin-bottom: 8px; }
+        .fjp-empty-hint p { margin: 0; font-size: 14px; }
+        .fjp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .fjp-table th { text-align: left; padding: 10px 12px; background: var(--bg-darker, #111122); border-bottom: 1px solid var(--border-color, #333); color: var(--gray-color); font-weight: 600; white-space: nowrap; }
+        .fjp-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color, #222); color: var(--text-color, #ccc); }
+        .fjp-table tr:hover td { background: rgba(74,158,255,0.04); }
+        .fjp-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+        .fjp-badge.claimed { background: rgba(46,204,113,0.15); color: #2ecc71; }
+        .fjp-badge.not-claimed { background: rgba(241,196,15,0.15); color: #f1c40f; }
+        .fjp-reset-btn { font-size: 12px; padding: 4px 12px; border-radius: 4px; border: 1px solid #e74c3c; background: rgba(231,76,60,0.1); color: #e74c3c; cursor: pointer; white-space: nowrap; }
+        .fjp-reset-btn:hover { background: rgba(231,76,60,0.25); }
+        .section-icon.first-join { background: rgba(155,89,182,0.15); color: #9b59b6; }
+        .fjp-confirm-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; }
+        .fjp-confirm-overlay.show { display: flex; }
+        .fjp-confirm-box { background: var(--bg-dark, #1a1a2e); border: 1px solid var(--border-color, #333); border-radius: 8px; padding: 24px; max-width: 420px; width: 90%; }
+        .fjp-confirm-box h4 { margin: 0 0 12px 0; color: #e74c3c; }
+        .fjp-confirm-box p { margin: 0 0 20px 0; font-size: 14px; color: var(--gray-color); }
+        .fjp-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .fjp-confirm-actions button { padding: 8px 20px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; }
+        .fjp-confirm-cancel { background: #333; color: #ccc; }
+        .fjp-confirm-danger { background: #e74c3c; color: #fff; }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -184,6 +209,39 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="setting-section">
+                    <div class="setting-section-header">
+                        <div class="setting-section-title">
+                            <div class="section-icon first-join"><i class="bi bi-people"></i></div>
+                            <span>首次登陆玩家管理</span>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadFirstJoinPlayers()">
+                            <i class="bi bi-arrow-repeat"></i> 刷新
+                        </button>
+                    </div>
+                    <div class="setting-section-body">
+                        <p class="form-text mb-3">管理所有首次登陆过的玩家，可以重置玩家的首次登陆状态（玩家将重新获得首次礼包资格）</p>
+                        <div class="fjp-table-wrapper" id="fjp-table-wrapper">
+                            <div class="fjp-empty-hint" id="fjp-empty">
+                                <i class="bi bi-inbox"></i>
+                                <p>暂无首次登陆玩家记录</p>
+                            </div>
+                            <table class="fjp-table" id="fjp-table" style="display:none;">
+                                <thead>
+                                    <tr>
+                                        <th>玩家名称</th>
+                                        <th>首次登陆时间</th>
+                                        <th>礼包状态</th>
+                                        <th>礼包领取时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fjp-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -234,7 +292,20 @@
         </div>
     </div>
 
+    <div class="fjp-confirm-overlay" id="fjp-confirm-overlay">
+        <div class="fjp-confirm-box">
+            <h4><i class="bi bi-exclamation-triangle"></i> 确认重置</h4>
+            <p>确定要重置玩家 <strong id="fjp-confirm-name"></strong> 的首次登陆状态吗？</p>
+            <p>重置后该玩家下次登陆时将重新获得首次加入欢迎消息和首次礼包。</p>
+            <div class="fjp-confirm-actions">
+                <button class="fjp-confirm-cancel" onclick="closeFjpConfirm()">取消</button>
+                <button class="fjp-confirm-danger" id="fjp-confirm-btn" onclick="confirmResetFirstJoin()">确认重置</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/token-manager.js"></script>
+    <script src="/js/common.js"></script>
     <script src="/js/shared.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/app.js"></script>
@@ -306,6 +377,7 @@
                     }
                     SidebarMenu.initSidebarWithPermission();
                     loadChatConfig();
+                    loadFirstJoinPlayers();
                     setupUnsavedChangesProtection();
                 }
             });
@@ -816,6 +888,98 @@
                 }
             }
         }
+
+        var fjpPendingPlayer = null;
+
+        async function loadFirstJoinPlayers() {
+            try {
+                var response = await fetchAPI('/api/chat/first-join-players');
+                var data = await response.json();
+                if (!data.success || !data.data) return;
+
+                var players = data.data;
+                var empty = document.getElementById('fjp-empty');
+                var table = document.getElementById('fjp-table');
+                var tbody = document.getElementById('fjp-tbody');
+
+                if (players.length === 0) {
+                    empty.style.display = 'block';
+                    table.style.display = 'none';
+                    return;
+                }
+
+                empty.style.display = 'none';
+                table.style.display = '';
+                tbody.innerHTML = '';
+
+                players.forEach(function(p) {
+                    var joinTime = p.first_join_at ? new Date(p.first_join_at * 1000).toLocaleString('zh-CN') : '--';
+                    var giftStatus = p.gift_claimed
+                        ? '<span class="fjp-badge claimed">已领取</span>'
+                        : '<span class="fjp-badge not-claimed">未领取</span>';
+                    var giftTime = p.gift_claimed_at ? new Date(p.gift_claimed_at * 1000).toLocaleString('zh-CN') : '--';
+
+                    var row = document.createElement('tr');
+                    row.innerHTML =
+                        '<td><strong>' + escapeHtml(p.player_name) + '</strong></td>' +
+                        '<td>' + joinTime + '</td>' +
+                        '<td>' + giftStatus + '</td>' +
+                        '<td>' + giftTime + '</td>' +
+                        '<td><button class="fjp-reset-btn" onclick="showFjpConfirm(\'' + escapeHtml(p.player_name).replace(/'/g, "\\'") + '\')"><i class="bi bi-arrow-counterclockwise"></i> 重置</button></td>';
+                    tbody.appendChild(row);
+                });
+
+                showToast('加载了 ' + players.length + ' 个首次登陆玩家', 'success');
+            } catch (e) {
+                showToast('加载首次登陆玩家列表失败: ' + e.message, 'error');
+            }
+        }
+
+        function showFjpConfirm(playerName) {
+            fjpPendingPlayer = playerName;
+            document.getElementById('fjp-confirm-name').textContent = playerName;
+            document.getElementById('fjp-confirm-overlay').classList.add('show');
+            document.getElementById('fjp-confirm-btn').disabled = false;
+        }
+
+        function closeFjpConfirm() {
+            document.getElementById('fjp-confirm-overlay').classList.remove('show');
+            fjpPendingPlayer = null;
+        }
+
+        async function confirmResetFirstJoin() {
+            if (!fjpPendingPlayer) return;
+            var btn = document.getElementById('fjp-confirm-btn');
+            btn.disabled = true;
+            btn.textContent = '重置中...';
+
+            try {
+                var response = await fetchAPI('/api/chat/first-join-players/' + encodeURIComponent(fjpPendingPlayer), {
+                    method: 'DELETE'
+                });
+                var data = await response.json();
+                if (data.success) {
+                    showToast('玩家 ' + fjpPendingPlayer + ' 的首次登陆状态已重置', 'success');
+                    closeFjpConfirm();
+                    loadFirstJoinPlayers();
+                } else {
+                    showToast('重置失败: ' + (data.error || '未知错误'), 'error');
+                    btn.disabled = false;
+                    btn.textContent = '确认重置';
+                }
+            } catch (e) {
+                showToast('重置失败: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '确认重置';
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            var overlay = document.getElementById('fjp-confirm-overlay');
+            if (overlay && e.target === overlay) {
+                closeFjpConfirm();
+            }
+        });
     </script>
 </body>
 </html>

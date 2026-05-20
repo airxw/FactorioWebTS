@@ -2,6 +2,8 @@ import websocketPlugin from '@fastify/websocket';
 import type { FastifyInstance } from 'fastify';
 import { verifyToken } from './jwt.js';
 import type { JwtPayload } from './jwt.js';
+import { logger } from '../lib/logger.js';
+import { WS_PING_INTERVAL } from '../config/constants.js';
 
 import type { WebSocket } from 'ws';
 
@@ -16,6 +18,7 @@ interface WsClient {
 export class WsManager {
   private clients = new Map<string, WsClient>();
   private nextId = 0;
+  private channelInitCallbacks = new Map<string, (socket: WebSocket) => void>();
 
   add(socket: WebSocket, user: JwtPayload | null): string {
     const id = String(++this.nextId);
@@ -32,11 +35,39 @@ export class WsManager {
     return id;
   }
 
-  subscribe(clientId: string, channels: string[]): void {
+  subscribe(clientId: string, channels: string[]): WebSocket | null {
+    const client = this.clients.get(clientId);
+    if (!client) return null;
+
+    for (const ch of channels) {
+      client.subscriptions.add(ch);
+    }
+
+    return client.socket;
+  }
+
+  unsubscribe(clientId: string, channels: string[]): void {
     const client = this.clients.get(clientId);
     if (!client) return;
 
-    client.subscriptions = new Set(channels);
+    if (channels.length === 0) {
+      client.subscriptions.clear();
+    } else {
+      for (const ch of channels) {
+        client.subscriptions.delete(ch);
+      }
+    }
+  }
+
+  onChannelSubscribe(channel: string, callback: (socket: WebSocket) => void): void {
+    this.channelInitCallbacks.set(channel, callback);
+  }
+
+  triggerChannelInit(socket: WebSocket, channels: string[]): void {
+    for (const ch of channels) {
+      const cb = this.channelInitCallbacks.get(ch);
+      if (cb) cb(socket);
+    }
   }
 
   broadcast(channel: string, data: unknown, requireAuth = false): number {
@@ -95,27 +126,37 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       } catch {}
     }
 
+    if (!user) {
+      logger.warn('WebSocket authentication failed: no valid token provided');
+      socket.send(JSON.stringify({ type: 'error', message: 'Authentication required' }));
+      socket.close(4001);
+      return;
+    }
+
     const clientId = wsManager.add(socket, user);
-    socket.send(JSON.stringify({ type: 'connected', client_id: clientId, authenticated: !!user }));
+    socket.send(JSON.stringify({ type: 'connected', client_id: clientId, authenticated: true }));
 
     const pingInterval = setInterval(() => {
       if (socket.readyState === WS_OPEN) {
         socket.send(JSON.stringify({ type: 'pong', time: Date.now() }));
       }
-    }, 30000);
+    }, WS_PING_INTERVAL);
 
     socket.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString());
 
         switch (msg.type) {
-          case 'subscribe':
-            wsManager.subscribe(clientId, msg.channels || []);
-            socket.send(JSON.stringify({ type: 'subscribed', channels: msg.channels }));
+          case 'subscribe': {
+            const channels = msg.channels || [];
+            const clientSocket = wsManager.subscribe(clientId, channels);
+            socket.send(JSON.stringify({ type: 'subscribed', channels }));
+            if (clientSocket) wsManager.triggerChannelInit(clientSocket, channels);
             break;
+          }
 
           case 'unsubscribe':
-            wsManager.subscribe(clientId, []);
+            wsManager.unsubscribe(clientId, msg.channels || []);
             break;
 
           case 'ping':

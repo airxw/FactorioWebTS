@@ -1,5 +1,5 @@
 import type { RconResult } from './rcon-types.js';
-import { executeRconCommand } from './rcon-pool.js';
+import { executeRconCommand } from './rcon-manager.js';
 import { logger } from './logger.js';
 
 export interface GameCommandBus {
