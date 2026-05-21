@@ -163,36 +163,45 @@ function scheduleRconConnectForStartup(): void {
     // 进程已退出，停止重试
     if (serverProcess && serverProcess.exitCode !== null) {
       logger.warn('[Server] Factorio process exited during RCON retry, stopping');
+      if (state === ServerState.STARTING) {
+        lastExitError = 'Factorio 进程在 RCON 连接期间退出';
+        setState(ServerState.ERROR);
+      }
       return;
     }
 
     attempts++;
     getRconManager().connect().then((res) => {
       if (res.ok) {
-        // 连接成功后尝试获取版本号
+        setState(ServerState.RUNNING);
         sendGameCommand('/version').then((verRes) => {
           if (verRes.ok) {
             const versionMatch = verRes.value.match(/Version:\s*([\d.]+)/i);
             if (versionMatch) serverVersion = versionMatch[1];
           }
         }).catch(() => {});
-        setState(ServerState.RUNNING);
         return;
       }
 
       if (attempts >= RCON_STARTUP_MAX_RETRIES) {
-        logger.error({ attempts }, '[Server] RCON 连接重试已达上限，启动失败');
-        lastExitError = `RCON 连接失败，已重试 ${attempts} 次`;
+        logger.error({ attempts, error: res.error }, '[Server] RCON 连接重试已达上限，启动失败');
+        lastExitError = `RCON 连接失败 (${res.error.code}: ${res.error.message})，已重试 ${attempts} 次`;
         setState(ServerState.ERROR);
         return;
       }
 
-      logger.info({ attempt: attempts, max: RCON_STARTUP_MAX_RETRIES }, '[Server] RCON 未就绪，2秒后重试');
+      logger.warn({ 
+        attempt: attempts, 
+        max: RCON_STARTUP_MAX_RETRIES,
+        errorCode: res.error.code,
+        errorMessage: res.error.message
+      }, '[Server] RCON 连接失败，2秒后重试');
       rconConnectTimer = setTimeout(tryConnect, RCON_STARTUP_RETRY_INTERVAL_MS);
-    }).catch(() => {
+    }).catch((err) => {
+      logger.warn({ attempt: attempts, max: RCON_STARTUP_MAX_RETRIES, err }, '[Server] RCON 连接异常，2秒后重试');
       if (attempts >= RCON_STARTUP_MAX_RETRIES) {
-        logger.error({ attempts }, '[Server] RCON 连接重试已达上限，启动失败');
-        lastExitError = `RCON 连接失败，已重试 ${attempts} 次`;
+        logger.error({ attempts, err }, '[Server] RCON 连接重试已达上限，启动失败');
+        lastExitError = `RCON 连接异常，已重试 ${attempts} 次`;
         setState(ServerState.ERROR);
         return;
       }
@@ -444,15 +453,20 @@ export async function startServer(
   const orphan = findFactorioPid();
   if (orphan) {
     serverStartTime = serverStartTime || Date.now();
+    currentConfigName = config || 'server-settings.json';
     setState(ServerState.STARTING);
-    getRconManager().connect().then((res) => {
+    closeRconManager();
+    getRconManager(currentConfigName);
+    return getRconManager().connect().then((res) => {
       if (res.ok) {
         setState(ServerState.RUNNING);
         return { message: 'Server is already running (detected existing process)' };
       }
+      lastExitError = 'Detected orphan process but RCON unreachable';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     }).catch(() => {
+      lastExitError = 'Detected orphan process but RCON unreachable';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     });
@@ -463,6 +477,9 @@ export async function startServer(
   serverVersion = version || '';
   serverStartTime = Date.now();
   stoppingRequestedAt = 0;
+
+  closeRconManager();
+  getRconManager(currentConfigName);
 
   try {
     const savesDir = resolveSavesDir();
@@ -498,7 +515,12 @@ export async function startServer(
       );
     }
 
-    const args = ['--start-server', savePath, '--server-settings', serverSettingsPath];
+    const args = [
+      '--start-server', savePath,
+      '--server-settings', serverSettingsPath,
+      '--rcon-port', String(rconPort),
+      '--rcon-password', rconPassword,
+    ];
 
     const logPath = resolveLogPath(version);
     const logDir = path.dirname(logPath);
@@ -549,15 +571,19 @@ export async function stopServer(): Promise<{ message: string }> {
 
   let graceful = false;
 
-  try {
-    await sendGameCommand('/server-save');
+  const saveRes = await sendGameCommand('/server-save');
+  if (saveRes.ok) {
     logger.info('Server save completed');
     await new Promise((r) => setTimeout(r, 3000));
-    await sendGameCommand('/quit');
-    logger.info('Quit command sent via RCON, waiting for process to exit');
-    graceful = true;
-  } catch {
-    logger.warn('RCON graceful shutdown failed, attempting SIGTERM');
+    const quitRes = await sendGameCommand('/quit');
+    if (quitRes.ok) {
+      logger.info('Quit command sent via RCON, waiting for process to exit');
+      graceful = true;
+    } else {
+      logger.warn({ error: quitRes.error }, 'RCON /quit command failed, attempting SIGTERM');
+    }
+  } else {
+    logger.warn({ error: saveRes.error }, 'RCON /server-save failed, attempting SIGTERM');
   }
 
   if (!graceful) {
@@ -635,10 +661,10 @@ export async function restartServer(): Promise<{ message: string }> {
   return { message: 'Server state abnormal during restart' };
 }
 
-export async function saveGame(): Promise<{ message: string }> {
+export async function saveGame(): Promise<{ message: string; success: boolean }> {
   const result = await sendGameCommand('/server-save');
-  if (result.ok) return { message: 'Save successful' };
-  return { message: 'Save command sent' };
+  if (result.ok) return { message: 'Save successful', success: true };
+  return { message: `Save failed: ${result.error.message || result.error.code}`, success: false };
 }
 
 const CONSOLE_LOG_CAPTURE_WINDOW_MS = 5000;

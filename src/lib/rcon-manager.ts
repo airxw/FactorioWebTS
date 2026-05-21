@@ -10,7 +10,6 @@ import {
   RCON_RECONNECT_BACKOFF_MULTIPLIER,
   RCON_RECONNECT_MAX_ATTEMPTS,
 } from '../config/constants.js';
-import { loadEnv } from '../config/env.js';
 
 interface RconSettings {
   host: string;
@@ -18,20 +17,25 @@ interface RconSettings {
   password: string;
 }
 
-export function resolveRconSettings(): RconSettings {
-  const env = loadEnv();
+export function resolveRconSettings(configFile?: string): RconSettings {
   const settings: RconSettings = {
-    host: env.RCON_HOST,
-    port: env.RCON_PORT,
-    password: env.RCON_PASSWORD || '',
+    host: '127.0.0.1',
+    port: 27015,
+    password: '',
   };
 
   try {
     const configDir = resolveConfigDir();
-    const serverSettingsPath = path.join(configDir, 'server-settings.json');
+    const serverSettingsFile = configFile || 'server-settings.json';
+    const serverSettingsPath = path.join(configDir, serverSettingsFile);
     if (existsSync(serverSettingsPath)) {
       const raw = readFileSync(serverSettingsPath, 'utf-8');
       const json = JSON.parse(raw);
+
+      const hostFromJson = json.rcon_ip || json['rcon-ip'] || json.rcon_host || json['rcon-host'];
+      if (hostFromJson && typeof hostFromJson === 'string') {
+        settings.host = hostFromJson;
+      }
 
       const portFromJson = parseInt(json.rcon_port || json['rcon-port'] || '0', 10);
       if (portFromJson > 0 && portFromJson <= 65535) {
@@ -43,7 +47,7 @@ export function resolveRconSettings(): RconSettings {
         settings.password = pwdFromJson;
       }
     }
-  } catch (e) { logger.warn({ err: e }, '[RCON] Failed to read server-settings.json for RCON config'); }
+  } catch (e) { logger.warn({ err: e, configFile }, '[RCON] Failed to read server-settings for RCON config'); }
 
   return settings;
 }
@@ -51,13 +55,19 @@ export function resolveRconSettings(): RconSettings {
 export class RconManager {
   private conn: RconConnection | null = null;
   private settings: RconSettings;
+  private configFile: string | undefined;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private intentionalDisconnect = false;
   private connectPromise: Promise<RconResult<boolean>> | null = null;
 
-  constructor() {
-    this.settings = resolveRconSettings();
+  constructor(configFile?: string) {
+    this.configFile = configFile;
+    this.settings = resolveRconSettings(configFile);
+  }
+
+  setConfigFile(configFile: string): void {
+    this.configFile = configFile;
   }
 
   async connect(): Promise<RconResult<boolean>> {
@@ -82,7 +92,7 @@ export class RconManager {
   }
 
   private async doConnect(): Promise<RconResult<boolean>> {
-    this.settings = resolveRconSettings();
+    this.settings = resolveRconSettings(this.configFile);
     const connection = new RconConnection(
       this.settings.host,
       this.settings.port,
@@ -203,10 +213,16 @@ export class RconManager {
 }
 
 let manager: RconManager | null = null;
+let managerConfigFile: string | undefined;
 
-export function getRconManager(): RconManager {
+export function getRconManager(configFile?: string): RconManager {
   if (!manager) {
-    manager = new RconManager();
+    manager = new RconManager(configFile || managerConfigFile);
+  } else if (configFile && configFile !== managerConfigFile) {
+    manager.setConfigFile(configFile);
+  }
+  if (configFile) {
+    managerConfigFile = configFile;
   }
   return manager;
 }

@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { RconError, rconOk, rconErr, type RconResult } from './rcon-types.js';
 
 const SERVERDATA_AUTH = 3;
+const SERVERDATA_AUTH_RESPONSE = 2;
 const SERVERDATA_EXECCOMMAND = 2;
 const SERVERDATA_RESPONSE_VALUE = 0;
 
@@ -178,21 +179,17 @@ export class RconConnection {
   }
 
   private handleAuthPacket(cmd: PendingCommand, packet: RconPacket): void {
-    if (packet.type === SERVERDATA_RESPONSE_VALUE) {
-      return;
-    }
-
     clearTimeout(cmd.timer);
     this.pending.delete(cmd.requestId);
 
-    if (packet.type === SERVERDATA_AUTH) {
+    if (packet.type === SERVERDATA_AUTH || packet.type === SERVERDATA_AUTH_RESPONSE || packet.type === SERVERDATA_RESPONSE_VALUE) {
       if (packet.id !== -1) {
         cmd.authResolve?.(rconOk(true));
       } else {
-        cmd.authResolve?.(rconOk(false));
+        cmd.authResolve?.(rconErr('AUTHENTICATION_FAILED', 'RCON authentication rejected'));
       }
     } else {
-      cmd.authResolve?.(rconOk(false));
+      cmd.authResolve?.(rconErr('AUTHENTICATION_FAILED', `Unexpected auth packet type: ${packet.type}`));
     }
   }
 

@@ -702,7 +702,7 @@
                 else {
                   var v = inp.value.trim();
                   if (v === '') {
-                    var requiredFields = ['name', 'description', 'rcon_password', 'rcon-port'];
+                    var requiredFields = ['name', 'description', 'rcon_password', 'rcon_port'];
                     if (requiredFields.indexOf(field.key) >= 0) {
                       setNestedValue(result, field.key, v);
                     } else {

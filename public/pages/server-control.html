@@ -379,7 +379,7 @@
                 return;
             }
 
-            if (isOperating) {
+            if (isOperating && serverState !== 'starting') {
                 btnStart.disabled = true;
                 btnStop.disabled = true;
                 btnRestart.disabled = true;
@@ -439,7 +439,7 @@
                 case 'starting':
                     showConsolePanel();
                     showConsolePanelWebSocket();
-                    updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong>');
+                    updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong> 等待 RCON 连接');
                     showLoadingOverlay(false);
                     break;
                 case 'stopping':
@@ -875,7 +875,7 @@
                     updateStatusBadge('starting');
                     showConsolePanel();
                     connectWebSocket();
-                    updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong>');
+                    updateStatusBanner('starting', '<i class="bi bi-hourglass-split"></i> <strong>服务器正在启动...</strong> 等待 RCON 连接');
 
                     try {
                         var res = await fetchAPI('/api/server/start', {
@@ -886,7 +886,6 @@
                         var result = await res.json();
                         if (result.success) {
                             showLoadingOverlay(false);
-                            setOperating(false);
                             showAlert('启动请求已发送: ' + (result.data && result.data.message || ''), 'success');
                             try { localStorage.setItem('server_running', 'true'); } catch(e) {}
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();

@@ -147,8 +147,9 @@ export class LogReader {
 
       let remainingText = '';
 
-      stream.on('data', (chunk: string) => {
-        const lines = (remainingText + chunk).split('\n');
+      stream.on('data', (chunk: string | Buffer) => {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+        const lines = (remainingText + text).split('\n');
         // 最后一项可能是不完整的行，暂存到下一次
         remainingText = lines.pop() || '';
 
