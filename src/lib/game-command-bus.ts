@@ -21,18 +21,16 @@ export function setServerRunningState(running: boolean, stopping: boolean): void
 
 export class RconCommandBus implements GameCommandBus {
   async execute(command: string): Promise<RconResult<string>> {
-    if (!serverRunning && !serverStopping) {
+    const isCritical = CRITICAL_COMMANDS.some((cc) =>
+      command.toLowerCase().startsWith(cc.toLowerCase())
+    );
+
+    if (!serverRunning && !serverStopping && !isCritical) {
       return rconErr('STATE_BLOCKED', `Server is not running, command blocked: ${command}`);
     }
 
-    if (serverStopping) {
-      const isCritical = CRITICAL_COMMANDS.some((cc) =>
-        command.toLowerCase().startsWith(cc.toLowerCase())
-      );
-      if (!isCritical) {
-        logger.warn({ command }, '[GameCommand] Non-critical command blocked during server stop');
-        return rconErr('STATE_BLOCKED', `Server is stopping, non-critical command blocked: ${command}`);
-      }
+    if (!serverRunning && serverStopping && !isCritical) {
+      return rconErr('STATE_BLOCKED', `Server is stopping, non-critical command blocked: ${command}`);
     }
 
     return executeRconCommand(command);

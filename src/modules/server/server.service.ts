@@ -3,12 +3,13 @@ import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getRconManager, closeRconManager } from '../../lib/rcon.js';
-import { sendGameCommand, setServerRunningState } from '../../lib/game-command-bus.js';
+import { sendGameCommand, fireAndForget, setServerRunningState } from '../../lib/game-command-bus.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../lib/logger.js';
 import { wsManager } from '../../plugins/websocket.js';
 import { resetLogWatcher } from '../../lib/log-watcher.js';
 import { eventBus } from '../../lib/event-bus.js';
+import { executeClaimCode } from '../cdk/cdk.service.js';
 import {
   resolveLogPath,
   resolveConfigDir,
@@ -32,6 +33,8 @@ const MAX_COMMAND_LENGTH = 500;
 const PROCESS_EXIT_TIMEOUT_MS = 20000;
 const RCON_STARTUP_RETRY_INTERVAL_MS = 2000;
 const RCON_STARTUP_MAX_RETRIES = 30;
+const DETECT_RETRY_INTERVAL_MS = 500;
+const DETECT_MAX_RETRIES = 6;
 
 let state: ServerStateValue = ServerState.UNKNOWN;
 let serverProcess: ChildProcess | null = null;
@@ -292,11 +295,83 @@ async function waitForProcessExit(timeoutMs: number): Promise<void> {
   killAllFactorioProcesses('SIGKILL');
 }
 
+function processStdoutLine(line: string): void {
+  if (line.includes('[CHAT]')) {
+    const chatIndex = line.indexOf('[CHAT]');
+    const afterChat = line.substring(chatIndex + 6).trim();
+
+    let player = '';
+    let message = '';
+    const angleMatch = afterChat.match(/^<([^>]+)>\s*(.*)/);
+    if (angleMatch) {
+      player = angleMatch[1];
+      message = angleMatch[2];
+    } else {
+      const colonMatch = afterChat.match(/^([^:]+):\s*(.*)/);
+      if (colonMatch) {
+        player = colonMatch[1];
+        message = colonMatch[2];
+      }
+    }
+
+    if (!player) return;
+
+    const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+    const time = timeMatch ? timeMatch[1] : '';
+
+    logger.info({ player, message, time }, '[Stdout] Emit log:chat');
+    eventBus.emit('log:chat', { player, message, raw: line, time });
+
+    if (message.startsWith('!claim ') || message.startsWith('!提货 ')) {
+      const code = message.substring(message.indexOf(' ') + 1);
+      executeClaimCode(player, code);
+    } else if (message === '!claim' || message === '!提货') {
+      fireAndForget(`/w ${player} 用法: !claim <提货码>`);
+    }
+    return;
+  }
+
+  if (line.includes('[JOIN]') || line.includes('joined the game')) {
+    const joinMatch = line.match(/(\S+)\s+joined the game/);
+    if (joinMatch) {
+      const playerName = joinMatch[1];
+      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1] : '';
+      logger.info({ playerName, time }, '[Stdout] Emit log:login + player:join');
+      eventBus.emit('log:login', { playerName, message: line, raw: line, time });
+      eventBus.emit('player:join', { playerName });
+    } else {
+      logger.info({ line }, '[Stdout] matched JOIN pattern but no player name extracted');
+    }
+    return;
+  }
+
+  if (line.includes('[LEAVE]') || line.includes('left the game')) {
+    const leaveMatch = line.match(/(\S+)\s+left the game/);
+    if (leaveMatch) {
+      const playerName = leaveMatch[1];
+      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1] : '';
+      logger.info({ playerName, time }, '[Stdout] Emit log:logout + player:leave');
+      eventBus.emit('log:logout', { playerName, message: line, raw: line, time });
+      eventBus.emit('player:leave', { playerName });
+    }
+    return;
+  }
+}
+
 function attachProcessListeners(child: ChildProcess): void {
   child.stdout?.on('data', (data: Buffer) => {
-    const msg = data.toString().trim();
+    const raw = data.toString();
+    const msg = raw.trim();
     if (!msg) return;
     logger.info({ source: 'factorio' }, msg);
+
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed) processStdoutLine(trimmed);
+    }
   });
 
   child.stderr?.on('data', (data: Buffer) => {
@@ -355,19 +430,36 @@ async function tryDetectRunning(): Promise<void> {
   const pid = findFactorioPid();
   if (pid) {
     setState(ServerState.STARTING);
-    getRconManager().connect().then((res) => {
-      if (res.ok) {
-        setState(ServerState.RUNNING);
-      } else {
-        logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
-        try { process.kill(pid, 'SIGTERM'); } catch {}
-        setState(ServerState.OFF);
-      }
-    }).catch(() => {
-      logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
-      try { process.kill(pid, 'SIGTERM'); } catch {}
-      setState(ServerState.OFF);
-    });
+    let attempts = 0;
+
+    const tryConnect = () => {
+      if (state !== ServerState.STARTING) return;
+      attempts++;
+      getRconManager().connect().then((res) => {
+        if (res.ok) {
+          setState(ServerState.RUNNING);
+        } else if (attempts >= DETECT_MAX_RETRIES) {
+          logger.warn({ pid, attempts }, '[Server] RCON unreachable after retries, setting ERROR');
+          lastExitError = 'Factorio 进程运行中但 RCON 无法连接，请手动检查';
+          setState(ServerState.ERROR);
+        } else {
+          logger.warn({ pid, attempt: attempts, max: DETECT_MAX_RETRIES }, '[Server] RCON unreachable in detect, retrying');
+          setTimeout(tryConnect, DETECT_RETRY_INTERVAL_MS);
+        }
+      }).catch(() => {
+        if (state !== ServerState.STARTING) return;
+        if (attempts >= DETECT_MAX_RETRIES) {
+          logger.warn({ pid, attempts }, '[Server] RCON unreachable after retries, setting ERROR');
+          lastExitError = 'Factorio 进程运行中但 RCON 无法连接，请手动检查';
+          setState(ServerState.ERROR);
+        } else {
+          logger.warn({ pid, attempt: attempts, max: DETECT_MAX_RETRIES }, '[Server] RCON unreachable in detect, retrying');
+          setTimeout(tryConnect, DETECT_RETRY_INTERVAL_MS);
+        }
+      });
+    };
+
+    tryConnect();
     return;
   }
 
@@ -452,21 +544,22 @@ export async function startServer(
 
   const orphan = findFactorioPid();
   if (orphan) {
-    serverStartTime = serverStartTime || Date.now();
-    currentConfigName = config || 'server-settings.json';
     setState(ServerState.STARTING);
     closeRconManager();
-    getRconManager(currentConfigName);
+    const tryConfig = config || currentConfigName || 'server-settings.json';
+    getRconManager(tryConfig);
     return getRconManager().connect().then((res) => {
       if (res.ok) {
+        currentConfigName = tryConfig;
+        serverStartTime = serverStartTime || Date.now();
         setState(ServerState.RUNNING);
         return { message: 'Server is already running (detected existing process)' };
       }
-      lastExitError = 'Detected orphan process but RCON unreachable';
+      lastExitError = '检测到运行中的 Factorio 进程但 RCON 无法连接（配置: ' + tryConfig + '），请确认服务器配置文件与实际运行配置一致';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     }).catch(() => {
-      lastExitError = 'Detected orphan process but RCON unreachable';
+      lastExitError = '检测到运行中的 Factorio 进程但 RCON 无法连接（配置: ' + tryConfig + '），请确认服务器配置文件与实际运行配置一致';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     });
@@ -534,7 +627,10 @@ export async function startServer(
       cwd: rootDir,
       env: { ...process.env },
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // ⚠️ 生产环境部署时需改回 ['ignore', 'pipe', 'pipe']
+      // 当前使用 'ignore' 是为了兼容 tsx watch 重启时不杀死 Factorio
+      // 如果改回 pipe，tsx watch 重启时 Node 关闭 pipe 会导致 Factorio 收到 SIGPIPE 异常退出
+      stdio: ['ignore', 'ignore', 'ignore'],
     });
 
     serverProcess = child;

@@ -31,11 +31,12 @@ export class LogReader {
     if (existsSync(this.logFilePath)) {
       const stat = statSync(this.logFilePath);
       this.logPosition = stat.size;
-      this.startWatching();
       logger.info({ logPath: this.logFilePath }, '日志流式监听已启动');
     } else {
       logger.info('日志文件不存在，等待服务器启动后自动激活');
     }
+
+    this.startWatching();
   }
 
   stop(): void {
@@ -196,13 +197,13 @@ export class LogReader {
     } else if (line.includes('joined the game')) {
       const playerName = this.parsePlayerNameFromEvent(line);
       if (playerName) {
-        eventBus.emit('log:login', { playerName, raw: line, time });
+        eventBus.emit('log:login', { playerName, message: line, raw: line, time });
         eventBus.emit('player:join', { playerName });
       }
     } else if (line.includes('left the game')) {
       const playerName = this.parsePlayerNameFromEvent(line);
       if (playerName) {
-        eventBus.emit('log:logout', { playerName, raw: line, time });
+        eventBus.emit('log:logout', { playerName, message: line, raw: line, time });
         eventBus.emit('player:leave', { playerName });
       }
     } else if (line.includes('[ERROR]') || (/^\s*\d+\.\d+\s+Error\s/.test(line) && !line.includes('InterruptibleStdioStream'))) {

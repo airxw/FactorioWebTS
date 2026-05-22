@@ -5,8 +5,8 @@ export interface EventMap {
   'player:leave': { playerName: string };
   'config:server-settings-changed': {};
   'log:chat': { player: string; message: string; raw: string; time: string };
-  'log:login': { playerName: string; raw: string; time: string };
-  'log:logout': { playerName: string; raw: string; time: string };
+  'log:login': { playerName: string; message: string; raw: string; time: string };
+  'log:logout': { playerName: string; message: string; raw: string; time: string };
   'log:error': { level: string; message: string; raw: string; time: string };
   'log:save': { message: string; raw: string; time: string };
   'log:system': { message: string; raw: string; time: string };
