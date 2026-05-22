@@ -10,6 +10,10 @@ export interface GameCommandBus {
 }
 
 const CRITICAL_COMMANDS = ['/quit', '/server-save', '/version'];
+const CHAT_COMMANDS = ['/shout', '/s', '/w', '/whisper', '/reply', '/give'];
+
+const FIRE_AND_FORGET_MAX_RETRIES = 10;
+const FIRE_AND_FORGET_RETRY_DELAY_MS = 2000;
 
 let serverRunning = false;
 let serverStopping = false;
@@ -24,8 +28,14 @@ export class RconCommandBus implements GameCommandBus {
     const isCritical = CRITICAL_COMMANDS.some((cc) =>
       command.toLowerCase().startsWith(cc.toLowerCase())
     );
+    const isChat = CHAT_COMMANDS.some((cc) =>
+      command.toLowerCase().startsWith(cc.toLowerCase())
+    );
 
     if (!serverRunning && !serverStopping && !isCritical) {
+      if (isChat) {
+        return executeRconCommand(command);
+      }
       return rconErr('STATE_BLOCKED', `Server is not running, command blocked: ${command}`);
     }
 
@@ -65,14 +75,24 @@ export async function sendGameCommand(command: string): Promise<RconResult<strin
 }
 
 export function fireAndForget(command: string): void {
-  getCommandBus().execute(command).then((result) => {
-    if (!result.ok) {
-      const code = (result.error as { code?: string })?.code;
-      if (code === 'STATE_BLOCKED') {
-        logger.info({ command }, '[GameCommand] Fire-and-forget blocked by state guard');
-      } else {
-        logger.warn({ err: result.error, command }, '[GameCommand] Fire-and-forget failed');
+  let attempt = 0;
+
+  const trySend = () => {
+    getCommandBus().execute(command).then((result) => {
+      if (!result.ok) {
+        const code = (result.error as { code?: string })?.code;
+        if (code === 'STATE_BLOCKED') {
+          logger.info({ command }, '[GameCommand] Fire-and-forget blocked by state guard');
+        } else if ((code === 'NOT_CONNECTED' || code === 'DISCONNECTED') && attempt < FIRE_AND_FORGET_MAX_RETRIES) {
+          attempt++;
+          logger.info({ command, attempt, maxRetries: FIRE_AND_FORGET_MAX_RETRIES }, '[GameCommand] RCON not ready, retrying fire-and-forget');
+          setTimeout(trySend, FIRE_AND_FORGET_RETRY_DELAY_MS);
+        } else {
+          logger.warn({ err: result.error, command, attempt }, '[GameCommand] Fire-and-forget failed after retries');
+        }
       }
-    }
-  });
+    });
+  };
+
+  trySend();
 }

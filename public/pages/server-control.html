@@ -355,6 +355,7 @@
         var logEntries = [];
         var MAX_LOG_ENTRIES = 2000;
         var stateReceived = false;
+        var CONSOLE_STORAGE_KEY = 'factorio_console_logs';
 
         var STATE_DISABLE_ALL = ['unknown', 'stopping'];
 
@@ -557,6 +558,7 @@
 
         function clearConsoleLogs() {
             logEntries = [];
+            try { sessionStorage.removeItem(CONSOLE_STORAGE_KEY); } catch(e) {}
             var body = document.getElementById('console-body');
             body.querySelectorAll('.console-line').forEach(function(el) { el.remove(); });
             var emptyEl = document.getElementById('console-empty');
@@ -575,6 +577,11 @@
                 var firstLine = body.querySelector('.console-line');
                 if (firstLine) firstLine.remove();
             }
+
+            try {
+                var toStore = logEntries.slice(-500);
+                sessionStorage.setItem(CONSOLE_STORAGE_KEY, JSON.stringify(toStore));
+            } catch(e) {}
 
             var line = document.createElement('div');
             line.className = 'console-line ' + (entry.level === 'ERROR' ? 'error' : entry.level === 'WARN' ? 'warn' : entry.type || 'system');
@@ -693,8 +700,25 @@
         }
 
         async function loadRecentLogs() {
+            var restored = false;
             try {
-                var response = await fetchAPI('/api/logs/tail?lines=100');
+                var stored = sessionStorage.getItem(CONSOLE_STORAGE_KEY);
+                if (stored) {
+                    var parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        logEntries = [];
+                        var body = document.getElementById('console-body');
+                        body.querySelectorAll('.console-line').forEach(function(el) { el.remove(); });
+                        parsed.forEach(function(entry) { appendConsoleLog(entry); });
+                        restored = true;
+                    }
+                }
+            } catch(e) {}
+
+            if (restored) return;
+
+            try {
+                var response = await fetchAPI('/api/logs/tail?lines=500');
                 var result = await response.json();
                 if (result.success && result.data && result.data.logs) {
                     result.data.logs.forEach(function(line) { appendConsoleLog(line); });

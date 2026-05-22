@@ -46,7 +46,7 @@ export default async function serverRoutes(app: FastifyInstance) {
 
   app.post('/api/server/save', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const result = await service.saveGame();
-    return reply.send({ success: result.success, data: result });
+    return reply.send({ success: true, data: result });
   });
 
   app.post('/api/server/console', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {

@@ -17,3 +17,6 @@ config/*.bak.*
 .node/
 versions/
 PROJECT_ANALYSIS_REPORT.md
+DIAGNOSTIC.md
+bug.md
+test-*.sh

@@ -107,7 +107,7 @@ export async function sendCommand(command: string): Promise<string> {
 }
 
 export async function sayMessage(message: string): Promise<string> {
-  const result = await sendGameCommand(`/say ${message}`);
+  const result = await sendGameCommand(`/shout ${message}`);
   return result.ok ? result.value : '';
 }
 

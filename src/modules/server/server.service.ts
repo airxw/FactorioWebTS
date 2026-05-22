@@ -33,8 +33,6 @@ const MAX_COMMAND_LENGTH = 500;
 const PROCESS_EXIT_TIMEOUT_MS = 20000;
 const RCON_STARTUP_RETRY_INTERVAL_MS = 2000;
 const RCON_STARTUP_MAX_RETRIES = 30;
-const DETECT_RETRY_INTERVAL_MS = 500;
-const DETECT_MAX_RETRIES = 6;
 
 let state: ServerStateValue = ServerState.UNKNOWN;
 let serverProcess: ChildProcess | null = null;
@@ -119,27 +117,12 @@ function startStatusPoller(): void {
           });
         }
       } else if (playersRes.value) {
-        const newPlayers: string[] = [];
+        const players: string[] = [];
         for (const m of playersRes.value.matchAll(/(\S+)\s+\(online\)/gi)) {
-          newPlayers.push(m[1]);
+          players.push(m[1]);
         }
-
-        for (const player of newPlayers) {
-          if (!cachedPlayers.includes(player)) {
-            logger.info({ player }, '[RCON State] 玩家加入游戏');
-            eventBus.emit('player:join', { playerName: player });
-          }
-        }
-
-        for (const player of cachedPlayers) {
-          if (!newPlayers.includes(player)) {
-            logger.info({ player }, '[RCON State] 玩家离开游戏');
-            eventBus.emit('player:leave', { playerName: player });
-          }
-        }
-
-        cachedPlayers = newPlayers;
-        cachedPlayerCount = newPlayers.length;
+        cachedPlayers = players;
+        cachedPlayerCount = players.length;
       }
     } catch (e) {
       logger.debug('[RCON Cache] Failed to background poll players');
@@ -345,6 +328,34 @@ function processStdoutLine(line: string): void {
     }
     return;
   }
+
+  if (line.includes('[JOIN]') || line.includes('joined the game')) {
+    const joinMatch = line.match(/(\S+)\s+joined the game/);
+    if (joinMatch) {
+      const playerName = joinMatch[1];
+      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1] : '';
+      logger.info({ playerName, time }, '[Stdout] Emit log:login + player:join');
+      eventBus.emit('log:login', { playerName, message: line, raw: line, time });
+      eventBus.emit('player:join', { playerName });
+    } else {
+      logger.info({ line }, '[Stdout] matched JOIN pattern but no player name extracted');
+    }
+    return;
+  }
+
+  if (line.includes('[LEAVE]') || line.includes('left the game')) {
+    const leaveMatch = line.match(/(\S+)\s+left the game/);
+    if (leaveMatch) {
+      const playerName = leaveMatch[1];
+      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1] : '';
+      logger.info({ playerName, time }, '[Stdout] Emit log:logout + player:leave');
+      eventBus.emit('log:logout', { playerName, message: line, raw: line, time });
+      eventBus.emit('player:leave', { playerName });
+    }
+    return;
+  }
 }
 
 function attachProcessListeners(child: ChildProcess): void {
@@ -417,36 +428,19 @@ async function tryDetectRunning(): Promise<void> {
   const pid = findFactorioPid();
   if (pid) {
     setState(ServerState.STARTING);
-    let attempts = 0;
-
-    const tryConnect = () => {
-      if (state !== ServerState.STARTING) return;
-      attempts++;
-      getRconManager().connect().then((res) => {
-        if (res.ok) {
-          setState(ServerState.RUNNING);
-        } else if (attempts >= DETECT_MAX_RETRIES) {
-          logger.warn({ pid, attempts }, '[Server] RCON unreachable after retries, setting ERROR');
-          lastExitError = 'Factorio 进程运行中但 RCON 无法连接，请手动检查';
-          setState(ServerState.ERROR);
-        } else {
-          logger.warn({ pid, attempt: attempts, max: DETECT_MAX_RETRIES }, '[Server] RCON unreachable in detect, retrying');
-          setTimeout(tryConnect, DETECT_RETRY_INTERVAL_MS);
-        }
-      }).catch(() => {
-        if (state !== ServerState.STARTING) return;
-        if (attempts >= DETECT_MAX_RETRIES) {
-          logger.warn({ pid, attempts }, '[Server] RCON unreachable after retries, setting ERROR');
-          lastExitError = 'Factorio 进程运行中但 RCON 无法连接，请手动检查';
-          setState(ServerState.ERROR);
-        } else {
-          logger.warn({ pid, attempt: attempts, max: DETECT_MAX_RETRIES }, '[Server] RCON unreachable in detect, retrying');
-          setTimeout(tryConnect, DETECT_RETRY_INTERVAL_MS);
-        }
-      });
-    };
-
-    tryConnect();
+    getRconManager().connect().then((res) => {
+      if (res.ok) {
+        setState(ServerState.RUNNING);
+      } else {
+        logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
+        try { process.kill(pid, 'SIGTERM'); } catch {}
+        setState(ServerState.OFF);
+      }
+    }).catch(() => {
+      logger.warn({ pid }, '[Server] Orphan factorio process found but RCON unreachable, killing and setting OFF');
+      try { process.kill(pid, 'SIGTERM'); } catch {}
+      setState(ServerState.OFF);
+    });
     return;
   }
 
@@ -531,22 +525,21 @@ export async function startServer(
 
   const orphan = findFactorioPid();
   if (orphan) {
+    serverStartTime = serverStartTime || Date.now();
+    currentConfigName = config || 'server-settings.json';
     setState(ServerState.STARTING);
     closeRconManager();
-    const tryConfig = config || currentConfigName || 'server-settings.json';
-    getRconManager(tryConfig);
+    getRconManager(currentConfigName);
     return getRconManager().connect().then((res) => {
       if (res.ok) {
-        currentConfigName = tryConfig;
-        serverStartTime = serverStartTime || Date.now();
         setState(ServerState.RUNNING);
         return { message: 'Server is already running (detected existing process)' };
       }
-      lastExitError = '检测到运行中的 Factorio 进程但 RCON 无法连接（配置: ' + tryConfig + '），请确认服务器配置文件与实际运行配置一致';
+      lastExitError = 'Detected orphan process but RCON unreachable';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     }).catch(() => {
-      lastExitError = '检测到运行中的 Factorio 进程但 RCON 无法连接（配置: ' + tryConfig + '），请确认服务器配置文件与实际运行配置一致';
+      lastExitError = 'Detected orphan process but RCON unreachable';
       setState(ServerState.ERROR);
       return { message: 'Detected orphan process but RCON unreachable, please stop first' };
     });

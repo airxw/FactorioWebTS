@@ -94,7 +94,7 @@
                                 </template>
                             </div>
                             <div class="card-footer" x-show="cart.length > 0">
-                                <button class="btn btn-primary w-100" @click="openCheckout()">去结账</button>
+                                <button class="btn btn-primary w-100" @click="showCheckout = true; checkoutError = ''">去结账</button>
                             </div>
                         </div>
 
@@ -160,7 +160,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showCheckout" @click.self="showCheckout = false" :style="{ display: showCheckout ? 'flex' : 'none' }">
+    <div class="modal-overlay" style="display:flex;" x-show="showCheckout" @click.self="showCheckout = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3>确认订单</h3><button class="modal-close" @click="showCheckout = false">&times;</button></div>
             <div class="modal-body">
@@ -193,7 +193,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showRequestModal" @click.self="showRequestModal = false" :style="{ display: showRequestModal ? 'flex' : 'none' }">
+    <div class="modal-overlay" style="display:flex;" x-show="showRequestModal" @click.self="showRequestModal = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3>请求物品</h3><button class="modal-close" @click="showRequestModal = false">&times;</button></div>
             <div class="modal-body">
@@ -332,12 +332,18 @@
         async loadItems() {
           try {
             var res = await fetch('/api/shop/items', { headers: this.authHeaders() });
+            if (!res.ok) throw new Error('Items API error: ' + res.status);
             var data = await res.json();
-            this.items = (data.success && data.data) ? data.data : [];
+            if (!data.success) throw new Error('Items API failed: ' + data.error);
+            this.items = data.data || [];
             var cats = {};
             this.items.forEach(function(i) { if (i.category) cats[i.category] = true; });
             this.categories = Object.keys(cats);
-          } catch(e) {}
+            console.log('Shop loaded', this.items.length, 'items');
+          } catch(e) {
+            console.error('Failed to load shop items:', e);
+            this.showToast('加载商品数据失败: ' + e.message, 'error');
+          }
         },
 
         async loadOrders() {

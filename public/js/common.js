@@ -19,7 +19,7 @@
 
   window.createPageApp = function(options) {
     options = options || {};
-    return Object.assign({
+    var base = {
       logout: function() {
         TokenManager.clear();
         window.location.href = 'login.html';
@@ -75,7 +75,10 @@
       authHeaders: function(contentType) {
         return getAuthHeaders(contentType);
       }
-    }, options);
+    };
+    var descriptors = Object.getOwnPropertyDescriptors(options);
+    Object.defineProperties(base, descriptors);
+    return base;
   };
 
   window.initCommonPage = function(appInstance) {

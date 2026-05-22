@@ -18,6 +18,7 @@ export interface LogEntry {
   level: string;
   message: string;
   raw: string;
+  playerName?: string;
 }
 
 export interface LogStats {
@@ -227,6 +228,7 @@ function parseLogLine(line: string): LogEntry | null {
   let type = 'system';
   let level = 'INFO';
   let message = line;
+  let playerName: string | undefined;
 
   const factorioMatch = line.match(/^\s*[\d.]+\s+(Verbose|Info|Warning|Error)\s+(.+)$/);
   if (factorioMatch) {
@@ -244,16 +246,16 @@ function parseLogLine(line: string): LogEntry | null {
   } else if (line.includes('[CHAT]')) {
     type = 'chat';
     message = line.replace(/.*?\[CHAT\]\s*/, '');
-  } else if (line.includes('[JOIN]')) {
+  } else if (line.includes('[JOIN]') || line.includes('joined the game')) {
     type = 'login';
     message = line.replace(/^.*?\[JOIN\]\s*/, '');
-  } else if (line.includes('[LEAVE]')) {
-    type = 'login';
+    const joinMatch = line.match(/(\S+)\s+joined the game/);
+    if (joinMatch) playerName = joinMatch[1];
+  } else if (line.includes('[LEAVE]') || line.includes('left the game')) {
+    type = 'logout';
     message = line.replace(/^.*?\[LEAVE\]\s*/, '');
-  } else if (line.includes('joined the game')) {
-    type = 'login';
-  } else if (line.includes('left the game')) {
-    type = 'login';
+    const leaveMatch = line.match(/(\S+)\s+left the game/);
+    if (leaveMatch) playerName = leaveMatch[1];
   } else if (line.includes('[ERROR]') || /\bError\b/.test(line)) {
     type = 'error';
     level = 'ERROR';
@@ -264,7 +266,7 @@ function parseLogLine(line: string): LogEntry | null {
     type = 'save';
   }
 
-  return { time, type, level, message, raw: line };
+  return { time, type, level, message, raw: line, playerName };
 }
 
 function buildStats(logs: LogEntry[]): LogStats {

@@ -3776,6 +3776,24 @@ textarea.form-control {
   min-width: 0;
 }
 
+.log-player {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 6px;
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-entry.logout .log-player {
+  background: rgba(139, 148, 158, 0.15);
+  color: #8b949e;
+}
+
 /* ============================================================
    46s. 颜色工具类
    ============================================================ */

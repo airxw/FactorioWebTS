@@ -96,8 +96,20 @@ async function getOnlinePlayersWithTimeout(timeoutMs: number): Promise<number> {
 }
 
 const ONLINE_PLAYERS_TIMEOUT_MS = 3000;
+const JOIN_DEBOUNCE_MS = 2000;
+
+const joinDebounceMap = new Map<string, ReturnType<typeof setTimeout>>();
 
 async function processPlayerJoin(playerName: string): Promise<void> {
+  if (joinDebounceMap.has(playerName)) {
+    clearTimeout(joinDebounceMap.get(playerName));
+    joinDebounceMap.delete(playerName);
+    return;
+  }
+  joinDebounceMap.set(playerName, setTimeout(() => {
+    joinDebounceMap.delete(playerName);
+  }, JOIN_DEBOUNCE_MS));
+
   const db = getDb();
   const settings = repo.getChatSettings(db);
   const isFirstJoin = !repo.hasPlayerLoginEvent(db, playerName);
@@ -109,7 +121,7 @@ async function processPlayerJoin(playerName: string): Promise<void> {
   if (isFirstJoin) {
     if (isEnabled(settings.first_join_enabled) && settings.first_join_message) {
       const msg = replaceMessageVariables(settings.first_join_message, playerName, onlineCount);
-      fireAndForget(`/say ${msg}`);
+      fireAndForget(`/shout ${msg}`);
     }
     if (isEnabled(settings.first_gift_enabled) && settings.first_gift_items) {
       try {
@@ -124,7 +136,7 @@ async function processPlayerJoin(playerName: string): Promise<void> {
 
   if (isEnabled(settings.join_enabled) && settings.join_message) {
     const msg = replaceMessageVariables(settings.join_message, playerName, onlineCount);
-    fireAndForget(`/say ${msg}`);
+    fireAndForget(`/shout ${msg}`);
   }
 
   if (!isFirstJoin && isEnabled(settings.relogin_gift_enabled) && settings.relogin_gift_items) {
@@ -159,7 +171,18 @@ async function processPlayerJoin(playerName: string): Promise<void> {
   }
 }
 
+const leaveDebounceMap = new Map<string, ReturnType<typeof setTimeout>>();
+
 async function processPlayerLeave(playerName: string): Promise<void> {
+  if (leaveDebounceMap.has(playerName)) {
+    clearTimeout(leaveDebounceMap.get(playerName));
+    leaveDebounceMap.delete(playerName);
+    return;
+  }
+  leaveDebounceMap.set(playerName, setTimeout(() => {
+    leaveDebounceMap.delete(playerName);
+  }, JOIN_DEBOUNCE_MS));
+
   const db = getDb();
   const settings = repo.getChatSettings(db);
 
@@ -169,7 +192,7 @@ async function processPlayerLeave(playerName: string): Promise<void> {
     const playersOnline = await getOnlinePlayersWithTimeout(ONLINE_PLAYERS_TIMEOUT_MS);
     const onlineCount = Math.max(0, playersOnline - 1);
     const msg = replaceMessageVariables(settings.leave_message, playerName, onlineCount);
-    fireAndForget(`/say ${msg}`);
+    fireAndForget(`/shout ${msg}`);
   }
 }
 
@@ -286,6 +309,34 @@ export function initChatEventSubscriptions(): void {
   });
   eventBus.on('log:chat', (data) => {
     logger.debug({ player: data.player, message: data.message }, '[Chat] 收到聊天消息');
+
+    try {
+      const db = getDb();
+      const triggers = repo.listTriggerResponses(db);
+
+      for (const trigger of triggers) {
+        if (!trigger.enabled) continue;
+
+        let isMatch = false;
+        if (trigger.case_sensitive) {
+          isMatch = data.message.includes(trigger.trigger_text);
+        } else {
+          isMatch = data.message.toLowerCase().includes(trigger.trigger_text.toLowerCase());
+        }
+
+        if (isMatch && trigger.response_text) {
+          const replyMsg = trigger.response_text
+            .replace(/\{player_name\}/g, data.player)
+            .replace(/\{trigger_text\}/g, trigger.trigger_text);
+
+          fireAndForget(`/shout ${replyMsg}`);
+          logger.info({ player: data.player, trigger: trigger.trigger_text }, '[Chat Trigger] 已自动回复');
+          break;
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, '[Chat Trigger] 自动回复执行失败');
+    }
   });
   eventBus.on('config:server-settings-changed', () => {
     clearServerNameCache();

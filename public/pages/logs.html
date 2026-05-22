@@ -75,6 +75,9 @@
                     <button class="cat-tab" data-type="login" onclick="switchCategory('login', this)">
                         <i class="bi bi-box-arrow-in-right"></i>登录日志
                     </button>
+                    <button class="cat-tab" data-type="logout" onclick="switchCategory('logout', this)">
+                        <i class="bi bi-box-arrow-right"></i>登出日志
+                    </button>
                     <button class="cat-tab" data-type="error" onclick="switchCategory('error', this)">
                         <i class="bi bi-exclamation-triangle"></i>错误日志
                     </button>
@@ -163,6 +166,7 @@
                         <label class="cat-checkbox"><input type="checkbox" value="system" checked> 系统日志</label>
                         <label class="cat-checkbox"><input type="checkbox" value="event" checked> 事件日志</label>
                         <label class="cat-checkbox"><input type="checkbox" value="login" checked> 登录日志</label>
+                        <label class="cat-checkbox"><input type="checkbox" value="logout" checked> 登出日志</label>
                         <label class="cat-checkbox"><input type="checkbox" value="error" checked> 错误日志</label>
                         <label class="cat-checkbox"><input type="checkbox" value="save" checked> 存档日志</label>
                     </div>
@@ -523,9 +527,15 @@
                 message = highlightText(message, searchVal);
             }
 
+            var playerTag = '';
+            if (entry.playerName && (entry.type === 'login' || entry.type === 'logout')) {
+                playerTag = '<span class="log-player">' + escapeHtml(entry.playerName) + '</span>';
+            }
+
             div.innerHTML =
                 '<span class="log-time">' + escapeHtml(entry.time || '') + '</span>' +
                 '<span class="log-level ' + (entry.level || 'INFO') + '">' + (entry.level || 'INFO') + '</span>' +
+                playerTag +
                 '<span class="log-msg">' + message + '</span>';
 
             return div;

@@ -113,7 +113,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showLevelModal" @click.self="showLevelModal = false" :style="{ display: showLevelModal ? 'flex' : 'none' }">
+    <div class="modal-overlay" style="display:flex;" x-show="showLevelModal" @click.self="showLevelModal = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3 class="modal-title" x-text="editingLevel ? '编辑VIP等级' : '创建新VIP等级'"></h3><button class="modal-close" @click="showLevelModal = false">&times;</button></div>
             <div class="modal-body">

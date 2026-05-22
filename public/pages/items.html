@@ -60,6 +60,9 @@
                             <span x-text="syncing ? '同步中...' : '从GitHub同步'"></span>
                         </button>
                     </div>
+                    <div class="debug-info" x-show="items.length > 0" style="padding: 10px; background: #f8f9fa; border-bottom: 1px solid #dee2e6; font-size: 12px; color: #666;">
+                        已加载 <strong x-text="items.length"></strong> 个物品 | 过滤后 <strong x-text="filteredItems.length"></strong> 个 | 第 <strong x-text="currentPage"></strong> / <strong x-text="totalPages"></strong> 页
+                    </div>
                     <div class="table-responsive" x-show="items.length > 0 || loading">
                         <table class="table mb-0">
                             <thead><tr><th>ID</th><th>代码</th><th>中文名</th><th>英文名</th><th>分类</th><th>状态</th><th class="text-end">操作</th></tr></thead>
@@ -104,7 +107,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showItemModal" @click.self="showItemModal = false" :style="{ display: showItemModal ? 'flex' : 'none' }">
+    <div class="modal-overlay" style="display:flex;" x-show="showItemModal" @click.self="showItemModal = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3 x-text="editingItem ? '编辑物品' : '添加物品'"></h3><button class="modal-close" @click="showItemModal = false">&times;</button></div>
             <div class="modal-body">
@@ -170,14 +173,24 @@
           this.loading = true;
           try {
             var res = await fetch('/api/shop/categories');
+            if (!res.ok) throw new Error('Categories API error: ' + res.status);
             var data = await res.json();
-            this.categories = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+            if (!data.success) throw new Error('Categories API failed: ' + data.error);
+            this.categories = data.data || [];
+          } catch(e) {
+            console.error('Failed to load categories:', e);
+          }
           try {
             var res = await fetch('/api/shop/items');
+            if (!res.ok) throw new Error('Items API error: ' + res.status);
             var data = await res.json();
-            this.items = (data.success && data.data) ? data.data : [];
-          } catch(e) {} finally {
+            if (!data.success) throw new Error('Items API failed: ' + data.error);
+            this.items = data.data || [];
+            console.log('Loaded', this.items.length, 'items from API');
+          } catch(e) {
+            console.error('Failed to load items:', e);
+            this.showToast('加载物品数据失败: ' + e.message, 'error');
+          } finally {
             this.loading = false;
           }
         },
@@ -185,28 +198,38 @@
         async syncFromGithub() {
           if (this.syncing) return;
           this.syncing = true;
+          console.log('Starting sync from GitHub...');
           try {
             var res = await fetch('/api/shop/sync', { method: 'POST', headers: this.authHeaders() });
+            console.log('Sync API response status:', res.status);
+            if (!res.ok) throw new Error('Sync API error: ' + res.status);
             var data = await res.json();
+            console.log('Sync API response data:', data);
             if (data.success) {
               this.showToast(`同步成功！共 ${data.count || 0} 个物品已更新`, 'success');
-              this.loadAll();
+              console.log('Synced', data.count, 'items, reloading data...');
+              await this.loadAll();
+              console.log('After reload, items.length =', this.items.length);
             } else {
               this.showToast(data.error || '同步失败', 'error');
+              console.error('Sync failed:', data.error);
             }
           } catch(e) {
-            this.showToast('同步失败：网络错误', 'error');
+            console.error('Sync error:', e);
+            this.showToast('同步失败：' + e.message, 'error');
           } finally {
             this.syncing = false;
           }
         },
 
         get filteredItems() {
-          var items = this.items;
-          var q = this.searchQuery.toLowerCase();
+          const self = this;
+          var items = self.items;
+          var q = self.searchQuery.toLowerCase();
           if (q) items = items.filter(function(i) { return (i.code||'').toLowerCase().indexOf(q)!==-1 || (i.name_cn||'').toLowerCase().indexOf(q)!==-1 || (i.name_en||'').toLowerCase().indexOf(q)!==-1; });
-          if (this.filterCategory) items = items.filter(function(i) { return i.category === this.filterCategory; }.bind(this));
-          if (this.filterStatus) items = items.filter(function(i) { return (i.enabled ? 'active' : 'inactive') === this.filterStatus; }.bind(this));
+          if (self.filterCategory) items = items.filter(function(i) { return i.category === self.filterCategory; });
+          if (self.filterStatus) items = items.filter(function(i) { return (i.enabled ? 'active' : 'inactive') === self.filterStatus; });
+          console.log('filteredItems:', items.length, 'from', self.items.length, '| category:', self.filterCategory, '| status:', self.filterStatus, '| search:', q);
           return items;
         },
 

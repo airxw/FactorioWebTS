@@ -3,6 +3,9 @@ import { watch, type FSWatcher } from 'node:fs';
 import { eventBus } from './event-bus.js';
 import { logger } from './logger.js';
 import { resolveLogPath } from './paths.js';
+import { executeClaimCode } from '../modules/cdk/cdk.service.js';
+import { verifyBindingCode } from '../modules/auth/auth.service.js';
+import { fireAndForget } from './game-command-bus.js';
 
 export class LogReader {
   private logFilePath: string = '';
@@ -185,16 +188,35 @@ export class LogReader {
           raw: line,
           time,
         });
+        if (chatData.message.startsWith('!claim ') || chatData.message.startsWith('!提货 ')) {
+          const code = chatData.message.substring(chatData.message.indexOf(' ') + 1);
+          executeClaimCode(chatData.player, code);
+        } else if (chatData.message === '!claim' || chatData.message === '!提货') {
+          fireAndForget(`/w ${chatData.player} 用法: !claim <提货码>`);
+        } else if (chatData.message.startsWith('#bind ')) {
+          const code = chatData.message.substring(6).trim();
+          try {
+            const result = verifyBindingCode(code, chatData.player);
+            fireAndForget(`/w ${chatData.player} ${result.message}`);
+            logger.info({ player: chatData.player, code }, '[Bind] 玩家绑定成功');
+          } catch (e: unknown) {
+            const err = e as { message: string };
+            fireAndForget(`/w ${chatData.player} 绑定失败: ${err.message}`);
+            logger.warn({ player: chatData.player, err: e }, '[Bind] 玩家绑定失败');
+          }
+        }
       }
     } else if (line.includes('joined the game')) {
       const playerName = this.parsePlayerNameFromEvent(line);
       if (playerName) {
         eventBus.emit('log:login', { playerName, message: line, raw: line, time });
+        eventBus.emit('player:join', { playerName });
       }
     } else if (line.includes('left the game')) {
       const playerName = this.parsePlayerNameFromEvent(line);
       if (playerName) {
         eventBus.emit('log:logout', { playerName, message: line, raw: line, time });
+        eventBus.emit('player:leave', { playerName });
       }
     } else if (line.includes('[ERROR]') || (/^\s*\d+\.\d+\s+Error\s/.test(line) && !line.includes('InterruptibleStdioStream'))) {
       eventBus.emit('log:error', { level: 'ERROR', message: line, raw: line, time });

@@ -164,7 +164,7 @@ export class Scheduler {
     if (msg.type === 'give') {
       command = `/give ${msg.target} ${msg.item_code} ${msg.item_count}`;
     } else {
-      command = `/say ${msg.content}`;
+      command = `/shout ${msg.content}`;
     }
 
     const result = await sendGameCommand(command);

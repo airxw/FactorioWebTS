@@ -127,7 +127,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showKickModal" @click.self="showKickModal = false">
+    <div class="modal-overlay" style="display:flex;" x-show="showKickModal" @click.self="showKickModal = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3 class="modal-title">踢出玩家</h3><button class="modal-close" @click="showKickModal = false">&times;</button></div>
             <div class="modal-body">
@@ -141,7 +141,7 @@
         </div>
     </div>
 
-    <div class="modal-overlay modal-overlay-init" x-show="showBanModal" @click.self="showBanModal = false">
+    <div class="modal-overlay" style="display:flex;" x-show="showBanModal" @click.self="showBanModal = false">
         <div class="modal-dialog">
             <div class="modal-header"><h3 class="modal-title">封禁玩家</h3><button class="modal-close" @click="showBanModal = false">&times;</button></div>
             <div class="modal-body">
