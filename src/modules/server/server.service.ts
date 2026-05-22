@@ -119,12 +119,27 @@ function startStatusPoller(): void {
           });
         }
       } else if (playersRes.value) {
-        const players: string[] = [];
+        const newPlayers: string[] = [];
         for (const m of playersRes.value.matchAll(/(\S+)\s+\(online\)/gi)) {
-          players.push(m[1]);
+          newPlayers.push(m[1]);
         }
-        cachedPlayers = players;
-        cachedPlayerCount = players.length;
+
+        for (const player of newPlayers) {
+          if (!cachedPlayers.includes(player)) {
+            logger.info({ player }, '[RCON State] 玩家加入游戏');
+            eventBus.emit('player:join', { playerName: player });
+          }
+        }
+
+        for (const player of cachedPlayers) {
+          if (!newPlayers.includes(player)) {
+            logger.info({ player }, '[RCON State] 玩家离开游戏');
+            eventBus.emit('player:leave', { playerName: player });
+          }
+        }
+
+        cachedPlayers = newPlayers;
+        cachedPlayerCount = newPlayers.length;
       }
     } catch (e) {
       logger.debug('[RCON Cache] Failed to background poll players');
@@ -327,34 +342,6 @@ function processStdoutLine(line: string): void {
       executeClaimCode(player, code);
     } else if (message === '!claim' || message === '!提货') {
       fireAndForget(`/w ${player} 用法: !claim <提货码>`);
-    }
-    return;
-  }
-
-  if (line.includes('[JOIN]') || line.includes('joined the game')) {
-    const joinMatch = line.match(/(\S+)\s+joined the game/);
-    if (joinMatch) {
-      const playerName = joinMatch[1];
-      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
-      const time = timeMatch ? timeMatch[1] : '';
-      logger.info({ playerName, time }, '[Stdout] Emit log:login + player:join');
-      eventBus.emit('log:login', { playerName, message: line, raw: line, time });
-      eventBus.emit('player:join', { playerName });
-    } else {
-      logger.info({ line }, '[Stdout] matched JOIN pattern but no player name extracted');
-    }
-    return;
-  }
-
-  if (line.includes('[LEAVE]') || line.includes('left the game')) {
-    const leaveMatch = line.match(/(\S+)\s+left the game/);
-    if (leaveMatch) {
-      const playerName = leaveMatch[1];
-      const timeMatch = line.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
-      const time = timeMatch ? timeMatch[1] : '';
-      logger.info({ playerName, time }, '[Stdout] Emit log:logout + player:leave');
-      eventBus.emit('log:logout', { playerName, message: line, raw: line, time });
-      eventBus.emit('player:leave', { playerName });
     }
     return;
   }
@@ -627,10 +614,7 @@ export async function startServer(
       cwd: rootDir,
       env: { ...process.env },
       detached: true,
-      // ⚠️ 生产环境部署时需改回 ['ignore', 'pipe', 'pipe']
-      // 当前使用 'ignore' 是为了兼容 tsx watch 重启时不杀死 Factorio
-      // 如果改回 pipe，tsx watch 重启时 Node 关闭 pipe 会导致 Factorio 收到 SIGPIPE 异常退出
-      stdio: ['ignore', 'ignore', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     serverProcess = child;

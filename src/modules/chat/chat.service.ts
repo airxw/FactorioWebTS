@@ -284,6 +284,9 @@ export function initChatEventSubscriptions(): void {
       logger.error({ err, playerName: data.playerName }, '[Chat] processPlayerLeave failed');
     });
   });
+  eventBus.on('log:chat', (data) => {
+    logger.debug({ player: data.player, message: data.message }, '[Chat] 收到聊天消息');
+  });
   eventBus.on('config:server-settings-changed', () => {
     clearServerNameCache();
   });
