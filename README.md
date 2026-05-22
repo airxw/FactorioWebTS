@@ -81,6 +81,26 @@ npm start           # 运行编译后的代码
 ./start.sh
 ```
 
+### 一键部署 (Linux 新服务器)
+
+```bash
+# 方式1: 直接执行（需 root/sudo）
+curl -fsSL https://raw.githubusercontent.com/airxw/FactorioWebTS/dev/scripts/deploy.sh | bash
+
+# 方式2: 下载脚本后执行
+wget https://raw.githubusercontent.com/airxw/FactorioWebTS/dev/scripts/deploy.sh
+chmod +x deploy.sh
+sudo ./deploy.sh
+```
+
+部署脚本会自动：
+- 检测并安装系统依赖
+- 安装 Node.js 22
+- 克隆/更新代码
+- 配置环境变量（JWT_SECRET 自动生成）
+- 初始化数据库
+- 创建 systemd 服务并开机自启
+
 ### Docker 部署
 
 ```bash
