@@ -41,7 +41,7 @@
                                         <input type="checkbox" x-model="showPrice" @change="savePricePref()">
                                         <span>显示价格</span>
                                     </label>
-                                    <select x-model="selectedCategory" @change="filterByCategory()" class="form-control" style="max-width:160px;">
+                                    <select x-model="selectedCategory" class="form-control" style="max-width:160px;">
                                         <option value="">全部分类</option>
                                         <template x-for="c in categories" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
                                     </select>
@@ -94,7 +94,7 @@
                                 </template>
                             </div>
                             <div class="card-footer" x-show="cart.length > 0">
-                                <button class="btn btn-primary w-100" @click="showCheckout = true; checkoutError = ''">去结账</button>
+                                <button class="btn btn-primary w-100" @click="openCheckout()">去结账</button>
                             </div>
                         </div>
 
@@ -201,7 +201,7 @@
                     <label class="form-label">选择物品</label>
                     <select class="form-control" x-model="requestItemId">
                         <option value="">-- 请选择物品 --</option>
-                        <template x-for="item in items" :key="item.id">
+                        <template x-for="item in displayItems" :key="item.id">
                             <option :value="item.id" x-text="(item.name_cn || item.code) + ' (' + item.code + ')'"></option>
                         </template>
                     </select>
@@ -217,7 +217,7 @@
                     </div>
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">品质等级</label>
-                        <select class="form-control" x-model="requestQuality">
+                        <select class="form-control" x-model.number="requestQuality">
                             <option value="1">普通</option>
                             <option value="2">稀有</option>
                             <option value="3">史诗</option>
@@ -268,6 +268,7 @@
         requestPlayerName: '',
         requestError: '',
         requestSubmitting: false,
+        selectedQualities: {},
 
         async syncCart() {
           if (this.syncing) return;
@@ -278,18 +279,18 @@
                 return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality || 1 };
               })
             });
-            await fetch('/api/cart', {
+            await fetchAPI('/api/cart', {
               method: 'PUT',
-              headers: this.authHeaders('application/json'),
+              headers: { 'Content-Type': 'application/json' },
               body: body
             });
-          } catch(e) {}
+          } catch(e) { this.showToast('同步购物车失败', 'error'); }
           finally { this.syncing = false; }
         },
 
         async fetchCart() {
           try {
-            var res = await fetch('/api/cart', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/cart');
             var data = await res.json();
             if (data.success && Array.isArray(data.data)) {
               this.cart = data.data.map(function(item) {
@@ -307,7 +308,7 @@
                 };
               });
             }
-          } catch(e) {}
+          } catch(e) { this.showToast('获取购物车失败', 'error'); }
         },
 
         init() {
@@ -331,7 +332,7 @@
 
         async loadItems() {
           try {
-            var res = await fetch('/api/shop/items', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/shop/items');
             if (!res.ok) throw new Error('Items API error: ' + res.status);
             var data = await res.json();
             if (!data.success) throw new Error('Items API failed: ' + data.error);
@@ -350,24 +351,25 @@
           try {
             var url = '/api/shop/orders/my';
             if (this.orderStatusFilter) url += '?status=' + this.orderStatusFilter;
-            var res = await fetch(url, { headers: this.authHeaders() });
+            var res = await fetchAPI(url);
             var data = await res.json();
             this.orders = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载订单失败', 'error'); }
         },
 
         async loadVipLevels() {
           try {
-            var res = await fetch('/api/vip/levels');
+            var res = await fetchAPI('/api/vip/levels');
             var data = await res.json();
             this.vipLevels = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载VIP等级失败', 'error'); }
         },
 
-        addToCart(item) {
-          var existing = this.cart.find(function(ci) { return ci.item.id === item.id; });
+        addToCart(item, quality) {
+          var q = quality != null ? quality : (item.quality_level || 0);
+          var existing = this.cart.find(function(ci) { return ci.item.id === item.id && ci.quality === q; });
           if (existing) { existing.quantity++; }
-          else { this.cart.push({ item: item, quantity: 1, quality: item.quality_level || 0 }); }
+          else { this.cart.push({ item: item, quantity: 1, quality: q }); }
           this.syncCart();
           this.showToast('已加入购物车', 'success');
         },
@@ -388,8 +390,8 @@
           try {
             if (this.cart.length === 1) {
               var ci = this.cart[0];
-              var res = await fetch('/api/shop/orders', {
-                method: 'POST', headers: this.authHeaders('application/json'),
+              var res = await fetchAPI('/api/shop/orders', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   item_id: ci.item.id,
                   quantity: ci.quantity,
@@ -406,8 +408,8 @@
             } else {
               var self = this;
               var items = this.cart.map(function(ci) { return { item_id: ci.item.id, quantity: ci.quantity, quality_level: ci.quality }; });
-              var res = await fetch('/api/shop/orders/batch', {
-                method: 'POST', headers: this.authHeaders('application/json'),
+              var res = await fetchAPI('/api/shop/orders/batch', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ items: items, player_name: self.playerName })
               });
               var data = await res.json();
@@ -425,7 +427,7 @@
           var confirmed = await window.showConfirm({ title: '取消订单', content: '确定取消这个订单吗？', danger: true });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/shop/orders/' + id + '/cancel', { method: 'POST', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/shop/orders/' + id + '/cancel', { method: 'POST' });
             var data = await res.json();
             this.showToast(data.success ? '订单已取消' : (data.error || '取消失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadOrders();
@@ -448,9 +450,9 @@
           this.requestError = '';
 
           try {
-            var res = await fetch('/api/shop/item-requests', {
+            var res = await fetchAPI('/api/shop/item-requests', {
               method: 'POST',
-              headers: this.authHeaders('application/json'),
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 item_id: parseInt(this.requestItemId),
                 player_name: this.requestPlayerName.trim(),

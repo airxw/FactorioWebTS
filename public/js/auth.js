@@ -82,6 +82,15 @@ function fetchAPI(url, options) {
                 handleUnauthorized();
                 throw new Error('Unauthorized');
             }
+            if (!response.ok) {
+                return response.json().then(function(errData) {
+                    throw new Error(errData.error || '请求失败 (' + response.status + ')');
+                }).catch(function(e) {
+                    if (e.message && e.message.indexOf('请求失败') !== -1) throw e;
+                    if (e.message && e.message !== 'Unexpected token') throw e;
+                    throw new Error('请求失败 (' + response.status + ')');
+                });
+            }
             return response;
         });
 }

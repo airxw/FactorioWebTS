@@ -74,8 +74,8 @@
                                 </template>
                             </select>
                             <button class="btn btn-sm btn-secondary" @click="loadTemplate()">加载</button>
-                            <button class="btn btn-sm btn-info" @click="validateConfig()">验证配置</button>
-                            <button class="btn btn-sm btn-primary" @click="saveConfig()">保存</button>
+                            <button class="btn btn-sm btn-info" @click="validateConfig()" :disabled="validateLoading">验证配置</button>
+                            <button class="btn btn-sm btn-primary" @click="saveConfig()" :disabled="saveLoading">保存</button>
                         </div>
                     </div>
 
@@ -317,6 +317,7 @@
         selectedTemplate: '',
         editorError: '',
         editorSuccess: '',
+        _successTimer: null,
         showTemplateModal: false,
         templateForm: { name: '', config_type: '', description: '' },
         templateError: '',
@@ -327,6 +328,8 @@
         backups: [],
         showBackupPanel: false,
         backupsLoading: false,
+        saveLoading: false,
+        validateLoading: false,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -345,10 +348,10 @@
 
         async loadConfigFiles() {
           try {
-            var res = await fetch('/api/config/files', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/config/files');
             var data = await res.json();
             if (data.success && data.data) { this.configFiles = data.data.files || []; }
-          } catch(e) {}
+          } catch(e) { this.showToast('加载配置文件失败', 'error'); }
         },
 
         configExists(key) {
@@ -379,7 +382,7 @@
           this.activeConfig = key;
           this.editorError = '';
           this.editorSuccess = '';
-          this.editorMode = 'visual';
+          if (!isSameConfig) this.editorMode = 'visual';
           var ft = this.fileTypes.find(function(t) { return t.key === key; });
           this.configFileName = ft ? ft.filename : (key + '.json');
 
@@ -390,15 +393,14 @@
               var currentData = this.collectVisualData();
               this.visualData = currentData;
               this.configContent = JSON.stringify(currentData, null, 2);
-            } catch(e) {
-            }
+            } catch(e) { this.showToast('收集可视化数据失败', 'error'); }
             this.renderVisualForm();
             return;
           }
 
           if (key === 'map-settings') {
             try {
-              var res1 = await fetch('/api/config/get?file_type=map-gen-settings', { headers: this.authHeaders() });
+              var res1 = await fetchAPI('/api/config/get?file_type=map-gen-settings');
               var data1 = await res1.json();
               var genData = {};
               if (data1.success && data1.data && data1.data.content !== null && data1.data.content !== undefined) {
@@ -406,7 +408,7 @@
                 try { genData = JSON.parse(raw1); } catch(e) { genData = {}; }
               }
 
-              var res2 = await fetch('/api/config/get?file_type=map-settings', { headers: this.authHeaders() });
+              var res2 = await fetchAPI('/api/config/get?file_type=map-settings');
               var data2 = await res2.json();
               var mapData = {};
               if (data2.success && data2.data && data2.data.content !== null && data2.data.content !== undefined) {
@@ -426,7 +428,7 @@
           }
 
           try {
-            var res = await fetch('/api/config/get?file_type=' + encodeURIComponent(key), { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/config/get?file_type=' + encodeURIComponent(key));
             var data = await res.json();
             var parsed = {};
             if (data.success && data.data && data.data.content !== null && data.data.content !== undefined) {
@@ -447,6 +449,13 @@
           this.editorSuccess = '';
         },
 
+        setEditorSuccess(msg) {
+          this.editorSuccess = msg;
+          if (this._successTimer) clearTimeout(this._successTimer);
+          var self = this;
+          this._successTimer = setTimeout(function() { self.editorSuccess = ''; }, 5000);
+        },
+
         switchEditorMode(mode) {
           this.editorMode = mode;
           if (mode === 'visual') {
@@ -457,7 +466,7 @@
             try {
               var vd = this.collectVisualData();
               this.configContent = JSON.stringify(vd, null, 2);
-            } catch(e) {}
+            } catch(e) { this.showToast('收集可视化数据失败', 'error'); }
           }
         },
 
@@ -728,6 +737,8 @@
           this.editorError = '';
           this.editorSuccess = '';
           if (!this.activeConfig) { this.showToast('请先选择配置类型', 'warning'); return; }
+          if (this.validateLoading) return;
+          this.validateLoading = true;
           var contentStr;
           if (this.editorMode === 'visual') {
             contentStr = JSON.stringify(this.collectVisualData(), null, 2);
@@ -749,42 +760,45 @@
               if (knownKeys.indexOf(k) === -1) { mapData[k] = allData[k]; }
             });
             try {
-              var res1 = await fetch('/api/config/validate', {
-                method: 'POST', headers: this.authHeaders('application/json'),
+              var res1 = await fetchAPI('/api/config/validate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ file_type: 'map-gen-settings', content: JSON.stringify(genData, null, 2) })
               });
               var d1 = await res1.json();
-              var res2 = await fetch('/api/config/validate', {
-                method: 'POST', headers: this.authHeaders('application/json'),
+              var res2 = await fetchAPI('/api/config/validate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ file_type: 'map-settings', content: JSON.stringify(mapData, null, 2) })
               });
               var d2 = await res2.json();
               var allErrors = [];
               if (d1.success && d1.data && d1.data.errors) allErrors = allErrors.concat(d1.data.errors);
               if (d2.success && d2.data && d2.data.errors) allErrors = allErrors.concat(d2.data.errors);
-              if (allErrors.length === 0) { this.editorSuccess = '配置验证通过'; }
+              if (allErrors.length === 0) { this.setEditorSuccess('配置验证通过'); }
               else { this.editorError = '验证失败: ' + allErrors.join(', '); }
             } catch(e) { this.editorError = '网络错误: ' + e.message; }
             return;
           }
 
           try {
-            var res = await fetch('/api/config/validate', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/config/validate', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ file_type: this.activeConfig, content: contentStr })
             });
             var data = await res.json();
             if (data.success && data.data) {
-              if (data.data.valid) { this.editorSuccess = '配置验证通过'; }
+              if (data.data.valid) { this.setEditorSuccess('配置验证通过'); }
               else { this.editorError = data.data.message || '验证失败'; if (data.data.errors) this.editorError += ': ' + data.data.errors.join(', '); }
             } else { this.editorError = data.error || '验证请求失败'; }
           } catch(e) { this.editorError = '网络错误: ' + e.message; }
+          finally { this.validateLoading = false; }
         },
 
         async saveConfig() {
           this.editorError = '';
           this.editorSuccess = '';
           if (!this.activeConfig) { this.showToast('请先选择配置类型', 'warning'); return; }
+          if (this.saveLoading) return;
+          this.saveLoading = true;
           var contentStr;
           if (this.editorMode === 'visual') {
             var collectedData = this.collectVisualData();
@@ -807,32 +821,37 @@
               if (knownKeys.indexOf(k) === -1) { mapData[k] = allData[k]; }
             });
             try {
-              var res1 = await fetch('/api/config/save', {
-                method: 'POST', headers: this.authHeaders('application/json'),
-                body: JSON.stringify({ file_type: 'map-gen-settings', content: JSON.stringify(genData, null, 2) })
-              });
-              var res2 = await fetch('/api/config/save', {
-                method: 'POST', headers: this.authHeaders('application/json'),
-                body: JSON.stringify({ file_type: 'map-settings', content: JSON.stringify(mapData, null, 2) })
-              });
-              var d1 = await res1.json();
-              var d2 = await res2.json();
-              if (d1.success && d2.success) {
-                this.configContent = contentStr;
-                this.configOriginal = contentStr;
-                try { this.visualData = JSON.parse(contentStr); } catch(e) {}
-                this.editorSuccess = '配置已保存 - 可在服务器控制页面的启动配置中使用';
-                this.loadConfigFiles();
-              } else {
-                this.editorError = (d1.error || '') + ' ' + (d2.error || '');
+              var results = await Promise.all([
+                fetchAPI('/api/config/save', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ file_type: 'map-gen-settings', content: JSON.stringify(genData, null, 2) })
+                }),
+                fetchAPI('/api/config/save', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ file_type: 'map-settings', content: JSON.stringify(mapData, null, 2) })
+                })
+              ]);
+              var d1 = await results[0].json();
+              var d2 = await results[1].json();
+              var errors = [];
+              if (!d1.success) errors.push('map-gen-settings: ' + (d1.error || '未知错误'));
+              if (!d2.success) errors.push('map-settings: ' + (d2.error || '未知错误'));
+              if (errors.length > 0) {
+                this.editorError = '保存失败 - ' + errors.join('; ');
+                return;
               }
+              this.configContent = contentStr;
+              this.configOriginal = contentStr;
+              try { this.visualData = JSON.parse(contentStr); } catch(e) {}
+              this.setEditorSuccess('配置已保存 - 可在服务器控制页面的启动配置中使用');
+              this.loadConfigFiles();
             } catch(e) { this.editorError = '网络错误: ' + e.message; }
             return;
           }
 
           try {
-            var res = await fetch('/api/config/save', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/config/save', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ file_type: this.activeConfig, content: contentStr })
             });
             var data = await res.json();
@@ -840,10 +859,11 @@
               this.configContent = contentStr;
               this.configOriginal = contentStr;
               try { this.visualData = JSON.parse(contentStr); } catch(e) {}
-              this.editorSuccess = '配置已保存 - 可在服务器控制页面的启动配置中使用';
+              this.setEditorSuccess('配置已保存 - 可在服务器控制页面的启动配置中使用');
               this.loadConfigFiles();
             } else { this.editorError = data.error || '保存失败'; }
           } catch(e) { this.editorError = '网络错误: ' + e.message; }
+          finally { this.saveLoading = false; }
         },
 
         formatJson() {
@@ -859,10 +879,10 @@
 
         async loadTemplates() {
           try {
-            var res = await fetch('/api/config/templates', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/config/templates');
             var data = await res.json();
             this.templates = (data.success && data.data && data.data.templates) ? data.data.templates : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载模板失败', 'error'); }
         },
 
         async loadTemplate() {
@@ -879,9 +899,8 @@
             this.visualData = config;
             if (this.editorMode === 'visual') this.renderVisualForm();
             this.editorError = '';
-            this.editorSuccess = '模板"' + tp.name + '"已加载';
+            this.setEditorSuccess('模板"' + tp.name + '"已加载');
             var self = this;
-            setTimeout(function() { self.editorSuccess = ''; }, 3000);
           } catch(e) { this.editorError = '加载模板失败: ' + e.message; }
         },
 
@@ -905,8 +924,8 @@
           var configObj;
           try { configObj = JSON.parse(this.configContent.trim()); } catch(e) { this.showToast('当前配置JSON格式错误', 'error'); return; }
           try {
-            var res = await fetch('/api/config/templates', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/config/templates', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 name: this.templateForm.name,
                 description: this.templateForm.description,
@@ -926,7 +945,9 @@
         async applyTemplate(id) {
           var tp = this.templates.find(function(t) { return t.id === id; });
           if (!tp) return;
-          if (tp.config_type) { this.activeConfig = tp.config_type; }
+          if (tp.config_type && tp.config_type !== this.activeConfig) {
+            this.selectConfig(tp.config_type);
+          }
           this.selectedTemplate = id.toString();
           await this.loadTemplate();
         },
@@ -935,7 +956,7 @@
           var confirmed = await window.showConfirm({ title: '删除模板', content: '确定删除模板"' + name + '"吗？', danger: true });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/config/templates/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/config/templates/' + id, { method: 'DELETE' });
             var data = await res.json();
             this.showToast(data.success ? '模板已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadTemplates();
@@ -958,7 +979,7 @@
           if (!this.activeConfig) return;
           this.backupsLoading = true;
           try {
-            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig), { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/config/backups/' + encodeURIComponent(this.activeConfig));
             var data = await res.json();
             this.backups = (data.success && data.data && data.data.backups) ? data.data.backups : [];
           } catch(e) { this.backups = []; }
@@ -973,9 +994,9 @@
           });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/restore', {
+            var res = await fetchAPI('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/restore', {
               method: 'POST',
-              headers: this.authHeaders('application/json'),
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ timestamp: timestamp })
             });
             var data = await res.json();
@@ -996,9 +1017,8 @@
           });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/cleanup', {
-              method: 'DELETE',
-              headers: this.authHeaders()
+            var res = await fetchAPI('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/cleanup', {
+              method: 'DELETE'
             });
             var data = await res.json();
             if (data.success) {
@@ -1011,7 +1031,24 @@
         },
 
         previewBackup(timestamp) {
-          this.showToast('预览功能开发中...', 'info');
+          if (!this.activeConfig) return;
+          var self = this;
+          fetchAPI('/api/config/backups/' + encodeURIComponent(this.activeConfig) + '/' + encodeURIComponent(timestamp))
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+              if (d.success && d.data && d.data.content) {
+                var formatted = d.data.content;
+                try { formatted = JSON.stringify(JSON.parse(d.data.content), null, 2); } catch(e) {}
+                showModal({
+                  title: '备份预览 - ' + self.formatBackupTime(timestamp.replace(/-/g, ':').replace(/T/g, ' ')),
+                  content: '<pre style="max-height:400px;overflow:auto;background:var(--color-bg);padding:12px;border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(formatted) + '</pre>',
+                  confirmText: '关闭'
+                });
+              } else {
+                self.showToast(d.error || '获取备份内容失败', 'error');
+              }
+            })
+            .catch(function(e) { self.showToast('获取备份内容失败: ' + e.message, 'error'); });
         },
 
         formatBackupTime(ts) {

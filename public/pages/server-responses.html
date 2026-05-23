@@ -104,6 +104,15 @@
                 </div>
 
                 <div class="mb-3">
+                    <label class="form-label">大小写敏感</label>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" id="resp-case-sensitive">
+                        <span>区分大小写</span>
+                    </label>
+                    <div class="form-text">勾选后关键词匹配时区分大小写</div>
+                </div>
+
+                <div class="mb-3">
                     <label class="form-label">关键词<span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="resp-keywords" placeholder="请输入关键词，多个关键词用逗号分隔，如 tps,lag,卡">
                     <div class="form-text">当玩家聊天中包含这些关键词时会自动触发该规则</div>
@@ -198,8 +207,9 @@
             }
 
             responseList.forEach(function(resp, index) {
-                var typeClass = resp.case_sensitive ? 'custom' : 'normal';
-                var typeLabel = resp.case_sensitive ? '区分大小写' : '不区分大小写';
+                var typeLabel = resp.type || 'custom';
+                var typeClass = resp.type || 'custom';
+                var caseLabel = resp.case_sensitive ? '区分大小写' : '不区分大小写';
                 var keywords = (resp.trigger_text || '').split(',').map(function(k) {
                     return k.trim();
                 }).filter(Boolean).map(function(k) {
@@ -239,7 +249,8 @@
         function openAddModal() {
             document.getElementById('edit-response-id').value = '';
             document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-plus-circle"></i>添加自动回复规则';
-            document.getElementById('resp-type').value = '0';
+            document.getElementById('resp-type').value = 'custom';
+            document.getElementById('resp-case-sensitive').checked = false;
             document.getElementById('resp-keywords').value = '';
             document.getElementById('resp-content').value = '';
             openResponseModal();
@@ -251,7 +262,8 @@
 
             document.getElementById('edit-response-id').value = resp.id;
             document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-pencil"></i>编辑自动回复规则';
-            document.getElementById('resp-type').value = resp.case_sensitive ? '1' : '0';
+            document.getElementById('resp-type').value = resp.type || 'custom';
+            document.getElementById('resp-case-sensitive').checked = !!resp.case_sensitive;
             document.getElementById('resp-keywords').value = resp.trigger_text || '';
             document.getElementById('resp-content').value = resp.response_text || '';
 
@@ -259,7 +271,8 @@
         }
 
         async function saveResponse() {
-            var caseSensitive = parseInt(document.getElementById('resp-type').value) ? 1 : 0;
+            var type = document.getElementById('resp-type').value;
+            var caseSensitive = document.getElementById('resp-case-sensitive').checked ? 1 : 0;
             var keywords = document.getElementById('resp-keywords').value.trim();
             var content = document.getElementById('resp-content').value.trim();
             var editId = document.getElementById('edit-response-id').value;
@@ -273,11 +286,13 @@
                 return;
             }
 
+            var original = editId ? responseList.find(function(r) { return r.id == editId; }) : null;
             var body = JSON.stringify({
+                type: type,
                 trigger_text: keywords,
                 response_text: content,
                 case_sensitive: caseSensitive,
-                enabled: 1
+                enabled: original ? original.enabled : 1
             });
 
             try {
@@ -321,9 +336,11 @@
                     loadResponses();
                 } else {
                     showToast('状态切换失败: ' + (result.error || '未知错误'), 'error');
+                    loadResponses();
                 }
             } catch (e) {
                 showToast('状态切换失败: ' + e.message, 'error');
+                loadResponses();
             }
         }
 

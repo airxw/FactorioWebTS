@@ -78,14 +78,14 @@
         </div>
     </div>
 
-    <div class="modal fade" id="messageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-overlay" id="messageModal" style="display:none;">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="messageModalTitle">
                         <i class="bi bi-plus-circle" style="color: var(--primary-color);"></i>添加周期消息
                     </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                    <button type="button" class="modal-close" onclick="closeModal('messageModal')">&times;</button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="edit-message-id" value="">
@@ -140,7 +140,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('messageModal')">取消</button>
                     <button type="button" class="btn btn-primary" onclick="saveMessage()">
                         <i class="bi bi-check-lg me-1"></i>保存
                     </button>
@@ -149,7 +149,7 @@
         </div>
     </div>
 
-    <div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-overlay" id="deleteModal" style="display:none;">
         <div class="modal-dialog modal-sm modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-body text-center py-4">
@@ -159,7 +159,7 @@
                     <input type="hidden" id="delete-message-id" value="">
                 </div>
                 <div class="modal-footer justify-content-center">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteModal')">取消</button>
                     <button type="button" class="btn btn-danger" onclick="confirmDelete()">
                         <i class="bi bi-trash me-1"></i>删除
                     </button>
@@ -178,6 +178,14 @@
     <script src="/js/tooltip.js"></script>
     <script>
         var messageList = [];
+
+        function openModal(id) {
+            document.getElementById(id).style.display = 'flex';
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
             checkSession({
@@ -297,7 +305,7 @@
             document.getElementById('msg-interval-value').value = '30';
             document.getElementById('msg-target').value = 'all';
             toggleItemType();
-            new bootstrap.Modal(document.getElementById('messageModal')).show();
+            openModal('messageModal');
         }
 
         function openEditModal(id) {
@@ -315,7 +323,7 @@
             document.getElementById('msg-target').value = msg.target || 'all';
             toggleItemType();
 
-            new bootstrap.Modal(document.getElementById('messageModal')).show();
+            openModal('messageModal');
         }
 
         async function saveMessage() {
@@ -361,7 +369,7 @@
                 });
                 var result = await response.json();
                 if (result.success) {
-                    bootstrap.Modal.getInstance(document.getElementById('messageModal')).hide();
+                    closeModal('messageModal');
                     showToast(editId ? '消息已更新' : '消息已添加', 'success');
                     loadMessages();
                 } else {
@@ -385,15 +393,17 @@
                     loadMessages();
                 } else {
                     showToast('操作失败: ' + (result.error || result.message || '未知错误'), 'error');
+                    loadMessages();
                 }
             } catch (e) {
                 showToast('操作失败: ' + e.message, 'error');
+                loadMessages();
             }
         }
 
         function openDeleteModal(id) {
             document.getElementById('delete-message-id').value = id;
-            new bootstrap.Modal(document.getElementById('deleteModal')).show();
+            openModal('deleteModal');
         }
 
         async function confirmDelete() {
@@ -404,7 +414,7 @@
                 });
                 var result = await response.json();
                 if (result.success) {
-                    bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+                    closeModal('deleteModal');
                     showToast('消息已删除', 'success');
                     loadMessages();
                 } else {

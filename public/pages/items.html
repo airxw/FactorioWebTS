@@ -79,8 +79,8 @@
                                         <td class="text-end">
                                             <div class="action-btn-group justify-end">
                                                 <button class="btn-icon-sm edit" @click="openEditItem(item)"><i class="bi bi-pencil"></i></button>
-                                                <button class="btn-icon-sm delete" @click="deleteItem(item.id)"><i class="bi bi-trash"></i></button>
-                                                <button class="btn-icon-sm toggle" @click="toggleItem(item.id, item.enabled)"><i :class="item.enabled ? 'bi bi-pause' : 'bi bi-play'"></i></button>
+                                                <button class="btn-icon-sm delete" @click="deleteItem(item.id)" :disabled="deleteLoading"><i class="bi bi-trash"></i></button>
+                                                <button class="btn-icon-sm toggle" @click="toggleItem(item.id, item.enabled)" :disabled="toggleLoading"><i :class="item.enabled ? 'bi bi-pause' : 'bi bi-play'"></i></button>
                                             </div>
                                         </td>
                                     </tr>
@@ -92,7 +92,7 @@
                         <div class="text-muted">
                             <span>共 <span x-text="filteredItems.length"></span> 个物品，</span>
                             <span>每页</span>
-                            <select x-model="perPage" @change="currentPage = 1" class="form-select-sm">
+                            <select x-model.number="perPage" @change="currentPage = 1" class="form-select-sm">
                                 <option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option>
                             </select>
                         </div>
@@ -128,7 +128,7 @@
                         </select>
                     </div>
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary">保存</button>
+                        <button type="submit" class="btn btn-primary" :disabled="saveLoading">保存</button>
                         <button type="button" class="btn btn-secondary" @click="showItemModal = false">取消</button>
                     </div>
                 </form>
@@ -159,20 +159,30 @@
         itemForm: { code: '', name_cn: '', name_en: '', category: '', quality_level: 0, enabled: '1' },
         loading: false,
         syncing: false,
+        saveLoading: false,
+        deleteLoading: false,
+        toggleLoading: false,
 
         init() {
-          var token = TokenManager.getToken();
-          var userInfo = TokenManager.getUserInfo();
-          if (!token) { window.location.href = 'login.html'; return; }
-          if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
-          SidebarMenu.initSidebarWithPermission();
-          this.loadAll();
+          var self = this;
+          checkSession({
+            requireAuth: true,
+            onValid: function(userData) {
+              if (userData.role !== 'admin') {
+                self.showToast('权限不足', 'error');
+                setTimeout(function() { window.location.href = 'dashboard.html'; }, 1500);
+                return;
+              }
+              SidebarMenu.initSidebarWithPermission();
+              self.loadAll();
+            }
+          });
         },
 
         async loadAll() {
           this.loading = true;
           try {
-            var res = await fetch('/api/shop/categories');
+            var res = await fetchAPI('/api/shop/categories');
             if (!res.ok) throw new Error('Categories API error: ' + res.status);
             var data = await res.json();
             if (!data.success) throw new Error('Categories API failed: ' + data.error);
@@ -181,7 +191,7 @@
             console.error('Failed to load categories:', e);
           }
           try {
-            var res = await fetch('/api/shop/items');
+            var res = await fetchAPI('/api/shop/items');
             if (!res.ok) throw new Error('Items API error: ' + res.status);
             var data = await res.json();
             if (!data.success) throw new Error('Items API failed: ' + data.error);
@@ -200,7 +210,7 @@
           this.syncing = true;
           console.log('Starting sync from GitHub...');
           try {
-            var res = await fetch('/api/shop/sync', { method: 'POST', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/shop/sync', { method: 'POST' });
             console.log('Sync API response status:', res.status);
             if (!res.ok) throw new Error('Sync API error: ' + res.status);
             var data = await res.json();
@@ -263,6 +273,8 @@
         async saveItem() {
           if (!this.itemForm.code) { this.showToast('请输入物品代码', 'warning'); return; }
           if (!this.itemForm.name_cn) { this.showToast('请输入中文名', 'warning'); return; }
+          if (this.saveLoading) return;
+          this.saveLoading = true;
           var payload = {
             name_cn: this.itemForm.name_cn, name_en: this.itemForm.name_en,
             category: this.itemForm.category, enabled: this.itemForm.enabled === '1',
@@ -276,34 +288,41 @@
           if (!this.editingItem) { payload.code = this.itemForm.code; }
 
           try {
-            var res = await fetch(url, { method: method, headers: this.authHeaders('application/json'), body: JSON.stringify(payload) });
+            var res = await fetchAPI(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             var data = await res.json();
             this.showToast(data.success ? '保存成功' : (data.error || '保存失败'), data.success ? 'success' : 'error');
             if (data.success) { this.showItemModal = false; this.loadAll(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.saveLoading = false; }
         },
 
         async deleteItem(id) {
           var confirmed = await window.showConfirm({ title: '删除物品', content: '确定要删除这个物品吗？', danger: true });
           if (!confirmed) return;
+          if (this.deleteLoading) return;
+          this.deleteLoading = true;
           try {
-            var res = await fetch('/api/shop/items/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/shop/items/' + id, { method: 'DELETE' });
             var data = await res.json();
             this.showToast(data.success ? '删除成功' : (data.error || '删除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadAll();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.deleteLoading = false; }
         },
 
         async toggleItem(id, enabled) {
+          if (this.toggleLoading) return;
+          this.toggleLoading = true;
           var item = this.items.find(function(i) { return i.id === id; });
-          if (!item) return;
+          if (!item) { this.toggleLoading = false; return; }
           var payload = { code: item.code, name_cn: item.name_cn || '', name_en: item.name_en || '', enabled: !enabled, price: 0, category: item.category || '', quality_level: item.quality_level || 0 };
           try {
-            var res = await fetch('/api/shop/items/' + id, { method: 'PUT', headers: this.authHeaders('application/json'), body: JSON.stringify(payload) });
+            var res = await fetchAPI('/api/shop/items/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             var data = await res.json();
             this.showToast(data.success ? '状态已切换' : (data.error || '操作失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadAll();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.toggleLoading = false; }
         },
 
       };

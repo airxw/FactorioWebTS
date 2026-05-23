@@ -297,7 +297,7 @@
                                                         <button class="btn btn-sm btn-warning" @click="verifyVer(v.version)">
                                                             <i class="bi bi-shield-check"></i> 验证
                                                         </button>
-                                                        <button class="btn btn-sm btn-danger" @click="deleteVer(v.version)" x-show="!v.is_current || !v.is_installed">
+                                                        <button class="btn btn-sm btn-danger" @click="deleteVer(v.version)" x-show="!v.is_current">
                                                             <i class="bi bi-trash"></i> 删除
                                                         </button>
                                                     </div>
@@ -348,6 +348,8 @@
         installStatusText: '',
         installFailed: false,
         _installPollTimer: null,
+        _refreshing: false,
+        installLoading: false,
 
         init() {
           window.__dashboardInstance = this;
@@ -423,7 +425,7 @@
             this.isAdmin = userInfo.role === 'admin';
           }
 
-          fetch('/api/auth/validate', { headers: { 'Authorization': 'Bearer ' + token } })
+          fetchAPI('/api/auth/validate')
             .then(r => r.json())
             .then(d => {
               if (d.success && d.data) {
@@ -434,20 +436,27 @@
                 TokenManager.clear();
                 window.location.href = 'login.html';
               }
+            })
+            .catch(function(err) {
+              console.error('验证失败:', err);
+              TokenManager.clear();
+              window.location.href = 'login.html';
             });
         },
 
         refreshAll() {
+          if (this._refreshing) return;
+          this._refreshing = true;
           this.loadServerStatus();
           this.loadCurrentVersion();
           this.loadVersionList();
+          var self = this;
+          setTimeout(function() { self._refreshing = false; }, 3000);
         },
 
         async loadServerStatus() {
           try {
-            var res = await fetch('/api/server/status', {
-              headers: this.authHeaders()
-            });
+            var res = await fetchAPI('/api/server/status');
             var data = await res.json();
             if (data.success && data.data) {
               this.serverState = data.data.state || 'unknown';
@@ -457,12 +466,12 @@
               this.uptimeText = this.formatUptime(data.data.uptime);
               this.updateStatus();
             }
-          } catch(e) { /* ignore */ }
+          } catch(e) { this.showToast('获取服务器状态失败', 'error'); }
         },
 
         async loadCurrentVersion() {
           try {
-            var res = await fetch('/api/versions/current', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/versions/current');
             var data = await res.json();
             if (data.success && data.data) {
               var v = data.data;
@@ -490,7 +499,7 @@
         async loadVersionList() {
           this.versionsLoaded = false;
           try {
-            var res = await fetch('/api/versions', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/versions');
             var data = await res.json();
             if (data.success) {
               this.versions = Array.isArray(data.data) ? data.data : [];
@@ -506,7 +515,7 @@
 
         async checkVersion() {
           try {
-            var res = await fetch('/api/versions/latest-all', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/versions/latest-all');
             var data = await res.json();
             if (data.success && data.data) {
               this.latestVersion = data.data;
@@ -544,7 +553,7 @@
                 var expText = expNeedInstall ? '安装测试版 ' + data.data.experimental.version : '测试版 ' + data.data.experimental.version + '（已安装）';
                 var expDisabled = expNeedInstall ? '' : 'disabled';
 
-                html += '<button class="btn ' + expBtnClass + ' update-btn" onclick="window.__dashboardInstance.installVersionByType(\'experimental\')" ' + expDisabled + '>'
+                html += '<button class="btn ' + expBtnClass + ' update-btn" onclick="if(window.__dashboardInstance.installLoading) return; window.__dashboardInstance.installVersionByType(\'experimental\')" ' + expDisabled + '>'
                   + '<i class="bi bi-flask"></i> ' + expText
                   + '</button>';
               }
@@ -559,6 +568,7 @@
         },
 
         async installVersionByType(releaseType) {
+          if (this.installLoading) return;
           var version = releaseType === 'experimental'
             ? (this.latestVersion && this.latestVersion.experimental ? this.latestVersion.experimental.version : null)
             : (this.latestVersion && this.latestVersion.stable ? this.latestVersion.stable.version : null);
@@ -572,11 +582,11 @@
           var confirmed = await window.showConfirm({ content: '确定要安装' + typeName + ' ' + version + ' 吗？' });
           if (!confirmed) return;
 
+          this.installLoading = true;
           try {
-            var headers = Object.assign({}, this.authHeaders(), { 'Content-Type': 'application/json' });
-            var res = await fetch('/api/versions/upgrade', {
+            var res = await fetchAPI('/api/versions/upgrade', {
               method: 'POST',
-              headers: headers,
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ target_version: version, release_type: releaseType })
             });
             var data = await res.json();
@@ -591,6 +601,7 @@
               this.showToast(data.error || '安装失败', 'error');
             }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.installLoading = false; }
         },
 
         startPollProgress(version) {
@@ -602,7 +613,7 @@
         },
 
         pollInstallProgress(version) {
-          fetch('/api/versions/progress?version=' + encodeURIComponent(version), { headers: this.authHeaders() })
+          fetchAPI('/api/versions/progress?version=' + encodeURIComponent(version))
             .then(r => r.json())
             .then(d => {
               if (d.success && d.data) {
@@ -610,6 +621,7 @@
                 this.installStatusText = d.data.status || '';
                 if (d.data.progress >= 100) {
                   this.stopPollProgress();
+                  this.installingVersion = '';
                   this.showToast('版本安装完成', 'success');
                   setTimeout(() => { this.loadVersionList(); this.loadCurrentVersion(); }, 1500);
                   return;
@@ -617,6 +629,7 @@
                 if (d.data.status && d.data.status.indexOf('失败') >= 0) {
                   this.installFailed = true;
                   this.stopPollProgress();
+                  this.installingVersion = '';
                   return;
                 }
               }
@@ -635,9 +648,8 @@
           var confirmed = await window.showConfirm({ content: '确定要将 ' + version + ' 设为默认版本吗？' });
           if (!confirmed) return;
           try {
-            var headers = Object.assign({}, this.authHeaders(), { 'Content-Type': 'application/json' });
-            var res = await fetch('/api/versions/set-default', {
-              method: 'POST', headers: headers,
+            var res = await fetchAPI('/api/versions/set-default', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ version: version })
             });
             var data = await res.json();
@@ -650,7 +662,7 @@
           var confirmed = await window.showConfirm({ title: '删除版本', content: '确定要删除版本 ' + version + ' 吗？此操作不可逆！', danger: true });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/versions/' + encodeURIComponent(version), { method: 'DELETE', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/versions/' + encodeURIComponent(version), { method: 'DELETE' });
             var data = await res.json();
             this.showToast(data.success ? '版本已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadVersionList();
@@ -659,7 +671,7 @@
 
         async verifyVer(version) {
           try {
-            var res = await fetch('/api/versions/verify/' + encodeURIComponent(version), { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/versions/verify/' + encodeURIComponent(version));
             var data = await res.json();
             var valid = data.success && data.data && data.data.valid;
             this.showToast(valid ? '版本验证成功' : (data.data && data.data.message ? data.data.message : '验证失败'), valid ? 'success' : 'error');

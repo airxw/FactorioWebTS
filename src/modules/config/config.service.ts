@@ -115,6 +115,18 @@ export function restoreBackup(fileType: string, timestamp: string): void {
   }
 }
 
+export function getBackupContent(fileType: string, timestamp: string): string {
+  const info = CONFIG_FILE_TYPES[fileType];
+  if (!info) throw new AppError('未知配置文件类型', 404);
+
+  const backupDir = getBackupDir(fileType);
+  const backupFile = path.join(backupDir, timestamp + '.json');
+
+  if (!existsSync(backupFile)) throw new AppError('备份文件不存在', 404);
+
+  return readFileSync(backupFile, 'utf-8');
+}
+
 export function cleanupBackups(fileType: string, keepCount: number = 10): number {
   const backups = listBackups(fileType);
   if (backups.length <= keepCount) return 0;

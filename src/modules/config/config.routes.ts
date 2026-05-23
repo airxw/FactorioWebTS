@@ -98,6 +98,19 @@ export default async function configRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get('/api/config/backups/:fileType/:timestamp', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
+    const { fileType, timestamp } = request.params as { fileType?: string; timestamp?: string };
+    if (!fileType) return reply.status(400).send({ success: false, error: 'fileType 是必填参数' });
+    if (!timestamp) return reply.status(400).send({ success: false, error: 'timestamp 是必填参数' });
+    try {
+      const content = service.getBackupContent(fileType, timestamp);
+      return reply.send({ success: true, data: { content } });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
+  });
+
   app.post('/api/config/backups/:fileType/restore', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const { fileType } = request.params as { fileType?: string };
     const { timestamp } = (request.body || {}) as { timestamp?: string };

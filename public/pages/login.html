@@ -170,8 +170,8 @@
             </div>
 
             <div class="auth-tabs">
-                <button class="auth-tab" :class="{ active: tab === 'login' }" @click="tab = 'login'">登录</button>
-                <button class="auth-tab" :class="{ active: tab === 'register' }" @click="tab = 'register'">注册</button>
+                <button class="auth-tab" :class="{ active: tab === 'login' }" :disabled="loading" @click="!loading && (tab = 'login')">登录</button>
+                <button class="auth-tab" :class="{ active: tab === 'register' }" :disabled="loading" @click="!loading && (tab = 'register')">注册</button>
             </div>
 
             <template x-if="tab === 'login'">
@@ -254,7 +254,8 @@
                 if (d.success && d.data) {
                   window.location.href = 'dashboard.html';
                 }
-              });
+              })
+              .catch(function() {});
           }
         },
 

@@ -136,7 +136,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" @click="showKickModal = false">取消</button>
-                <button class="btn btn-warning" @click="doKick()">踢出</button>
+                <button class="btn btn-warning" @click="doKick()" :disabled="kickLoading">踢出</button>
             </div>
         </div>
     </div>
@@ -150,7 +150,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" @click="showBanModal = false">取消</button>
-                <button class="btn btn-danger" @click="doBan()">封禁</button>
+                <button class="btn btn-danger" @click="doBan()" :disabled="banLoading">封禁</button>
             </div>
         </div>
     </div>
@@ -182,6 +182,8 @@
         kickReason: '',
         banTarget: '',
         banReason: '',
+        kickLoading: false,
+        banLoading: false,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -200,7 +202,7 @@
 
         async loadOnlinePlayers() {
           try {
-            var res = await fetch('/api/players/online', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/players/online');
             var data = await res.json();
             var raw = (data.success && data.data?.players) ? data.data.players : [];
             this.onlinePlayers = raw.map(function(p) {
@@ -217,7 +219,7 @@
 
         async loadAdmins() {
           try {
-            var res = await fetch('/api/players/admins', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/players/admins');
             var data = await res.json();
             this.admins = (data.success && data.data) ? data.data : [];
           } catch(e) { this.showToast('获取管理员列表失败', 'error'); }
@@ -225,7 +227,7 @@
 
         async loadBans() {
           try {
-            var res = await fetch('/api/players/bans', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/players/bans');
             var data = await res.json();
             this.bans = (data.success && data.data) ? data.data : [];
           } catch(e) { this.showToast('获取封禁列表失败', 'error'); }
@@ -233,7 +235,7 @@
 
         async loadWhitelist() {
           try {
-            var res = await fetch('/api/players/whitelist', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/players/whitelist');
             var data = await res.json();
             this.whitelist = (data.success && data.data) ? data.data : [];
           } catch(e) { this.showToast('获取白名单失败', 'error'); }
@@ -243,35 +245,41 @@
         openBanModal(name) { this.banTarget = name; this.banReason = ''; this.showBanModal = true; },
 
         async doKick() {
+          if (this.kickLoading) return;
+          this.kickLoading = true;
           try {
-            var res = await fetch('/api/players/kick', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/players/kick', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ player: this.kickTarget, reason: this.kickReason })
             });
             var data = await res.json();
             this.showToast(data.success ? '玩家已踢出' : (data.error || '操作失败'), data.success ? 'success' : 'error');
             if (data.success) { this.showKickModal = false; this.loadOnlinePlayers(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.kickLoading = false; }
         },
 
         async doBan() {
+          if (this.banLoading) return;
+          this.banLoading = true;
           try {
-            var res = await fetch('/api/players/ban', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/players/ban', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ player: this.banTarget, reason: this.banReason })
             });
             var data = await res.json();
             this.showToast(data.success ? '玩家已封禁' : (data.error || '操作失败'), data.success ? 'success' : 'error');
             if (data.success) { this.showBanModal = false; this.loadOnlinePlayers(); this.loadBans(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.banLoading = false; }
         },
 
         async unbanPlayer(name) {
           var confirmed = await window.showConfirm({ content: '确定要解封 ' + name + ' 吗？' });
           if (!confirmed) return;
           try {
-            var res = await fetch('/api/players/unban', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/players/unban', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ player: name })
             });
             var data = await res.json();

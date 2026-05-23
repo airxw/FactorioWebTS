@@ -142,8 +142,16 @@
     <script>
         var currentTab = 'users';
         var permissionsData = [];
+        var permissionsDirty = false;
+        var searchLoading = false;
 
         function switchTab(tab) {
+            if (currentTab === 'permissions' && permissionsDirty && tab !== 'permissions') {
+                if (!confirm('权限修改尚未保存，切换后将丢失修改，是否继续？')) {
+                    return;
+                }
+                permissionsDirty = false;
+            }
             currentTab = tab;
             document.querySelectorAll('.tab-btn').forEach(function(btn) {
                 btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -230,14 +238,18 @@
         }
 
         function searchUsers() {
+            if (searchLoading) return;
             var keyword = document.getElementById('search-keyword').value.trim();
             var listEl = document.getElementById('users-list');
+            var searchBtn = document.querySelector('#tab-users .btn-primary');
             
             if (!keyword) {
                 loadUsers();
                 return;
             }
             
+            searchLoading = true;
+            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = '搜索中...'; }
             listEl.className = 'loading';
             listEl.innerHTML = '搜索中...';
 
@@ -276,6 +288,10 @@
                 listEl.className = '';
                 listEl.innerHTML = '<p class="text-muted">网络错误，请稍后重试</p>';
                 console.error('搜索用户失败', err);
+            })
+            .finally(function() {
+                searchLoading = false;
+                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = '搜索'; }
             });
         }
 
@@ -424,6 +440,7 @@
             var perm = permissionsData.find(function(p) { return p.page_id === pageId; });
             if (perm) {
                 perm.visible_to_user = el.checked ? 1 : 0;
+                permissionsDirty = true;
             }
         }
 
@@ -447,6 +464,7 @@
                 if (data.success) {
                     showToast('权限设置保存成功', 'success');
                     localStorage.removeItem('sidebar_permissions');
+                    permissionsDirty = false;
                 } else {
                     showToast('保存失败: ' + (data.error || '未知错误'), 'error');
                 }

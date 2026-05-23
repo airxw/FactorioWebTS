@@ -45,9 +45,9 @@
                     <div class="card-body">
                         <div class="form-row-flex">
                             <div class="form-group flex-1" style="position:relative;">
-                                <input type="text" id="command-input" x-ref="cmdInput" class="form-control" placeholder="请输入RCON命令" autocomplete="off"
+                                <input type="text" id="command-input" x-ref="cmdInput" x-model="cmdInput" class="form-control" placeholder="请输入RCON命令" autocomplete="off"
                                        style="font-family:'Courier New',Courier,monospace;"
-                                       @keydown.enter="executeCommand($el.value.trim())"
+                                       @keydown.enter="executeCommand(cmdInput.trim())"
                                        @keydown.arrow-up.prevent="navigateHistory(-1,$el)"
                                        @keydown.arrow-down.prevent="navigateHistory(1,$el)"
                                        @keydown.escape="hideHistoryDropdown()"
@@ -59,7 +59,7 @@
                                     <template x-for="(cmd,i) in filteredHistory" :key="i">
                                         <div class="command-history-item"
                                              :class="{ active: i === historyIdx }"
-                                             @mousedown.prevent="$refs.cmdInput.value = cmd; hideHistoryDropdown()"
+                                             @mousedown.prevent="$refs.cmdInput.value = cmd; cmdInput = cmd; hideHistoryDropdown()"
                                              x-text="cmd"></div>
                                     </template>
                                 </div>
@@ -147,6 +147,10 @@
           if (userInfo && userInfo.role !== 'admin') { this.showToast('权限不足', 'error'); setTimeout(() => window.location.href = 'dashboard.html', 1500); return; }
           this.refreshStatus();
           this.pollTimer = setInterval(() => this.refreshStatus(), 10000);
+          var self = this;
+          window.addEventListener('beforeunload', function() {
+            if (self.pollTimer) clearInterval(self.pollTimer);
+          });
           this.initWebSocket();
         },
 
@@ -169,7 +173,7 @@
         async refreshStatus() {
           this.statusClass = 'status-loading';
           try {
-            var res = await fetch('/api/server/status', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/server/status');
             var data = await res.json();
             if (data.success && data.data) {
               var d = data.data;
@@ -206,8 +210,8 @@
           this.saveToLocalHistory(cmd);
 
           try {
-            var res = await fetch('/api/server/console', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/server/console', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ command: cmd })
             });
             var data = await res.json();
@@ -224,8 +228,11 @@
         },
 
         insertCommand(cmd) {
-          var el = document.getElementById('command-input');
-          if (el) { el.value = cmd; el.focus(); }
+          this.cmdInput = cmd;
+          this.$nextTick(function() {
+            var el = document.getElementById('command-input');
+            if (el) el.focus();
+          });
         },
 
         addOutput(text) {
@@ -242,7 +249,7 @@
         },
 
         get filteredHistory() {
-          var val = (document.getElementById('command-input')?.value || '').toLowerCase();
+          var val = (this.cmdInput || '').toLowerCase();
           var hist = this.getLocalHistory();
           if (!val) return hist;
           return hist.filter(function(c) { return c.toLowerCase().indexOf(val) !== -1; });
@@ -256,15 +263,19 @@
 
         hideHistoryDropdown() { this.historyVisible = false; this.historyIdx = -1; },
 
-        navigateHistory(dir, inputEl) {
+        navigateHistory(dir) {
           var hist = this.getLocalHistory();
           if (hist.length === 0) return;
           if (!this.historyVisible) { this.historyVisible = true; this.historyIdx = -1; }
           var newIdx = this.historyIdx + dir;
           if (newIdx < 0) newIdx = 0;
-          if (newIdx >= hist.length) { this.historyIdx = hist.length - 1; return; }
+          if (newIdx >= hist.length) {
+            this.historyIdx = hist.length;
+            this.cmdInput = '';
+            return;
+          }
           this.historyIdx = newIdx;
-          inputEl.value = hist[newIdx];
+          this.cmdInput = hist[newIdx];
         },
 
         getLocalHistory() {

@@ -138,6 +138,8 @@
     <script src="/js/tooltip.js"></script>
     <script src="/js/app.js"></script>
     <script>
+        var changePwdLoading = false;
+
         function formatDate(ts) {
             if (!ts) return '--';
             var d = new Date(ts * 1000);
@@ -154,7 +156,7 @@
             try {
                 var res = await fetchAPI('/api/auth/me');
                 var data = await res.json();
-                if (data && data.data) {
+                if (data.success && data.data) {
                     var userData = data.data;
                     document.getElementById('info-username').textContent = userData.username || '--';
                     document.getElementById('info-role').innerHTML = '<span class="role-badge"><i class="bi bi-shield-fill me-1"></i>' + escapeHtml(userData.role || '用户') + '</span>';
@@ -173,15 +175,15 @@
                     }
                     if (userData.game_id) {
                         document.getElementById('info-bind-status').innerHTML = '<span class="bind-status bound"><i class="bi bi-check-circle-fill"></i>已绑定</span>';
-                        document.getElementById('bind-player-row').style.display = 'flex';
+                        document.getElementById('bind-player-row').classList.remove('d-none');
                         document.getElementById('info-bind-player').textContent = userData.game_id;
-                        document.getElementById('bind-form').style.display = 'none';
-                        document.getElementById('unbind-section').style.display = 'block';
+                        document.getElementById('bind-form').classList.add('d-none');
+                        document.getElementById('unbind-section').classList.remove('d-none');
                     } else {
                         document.getElementById('info-bind-status').innerHTML = '<span class="bind-status unbound"><i class="bi bi-x-circle"></i>未绑定</span>';
-                        document.getElementById('bind-player-row').style.display = 'none';
-                        document.getElementById('bind-form').style.display = 'block';
-                        document.getElementById('unbind-section').style.display = 'none';
+                        document.getElementById('bind-player-row').classList.add('d-none');
+                        document.getElementById('bind-form').classList.remove('d-none');
+                        document.getElementById('unbind-section').classList.add('d-none');
                     }
                 }
             } catch (e) { console.error('加载个人信息失败', e); }
@@ -202,8 +204,8 @@
                 var data = await res.json();
                 if (data.success && data.data && data.data.code) {
                     document.getElementById('bind-code').textContent = data.data.code;
-                    document.getElementById('bind-form').style.display = 'none';
-                    document.getElementById('bind-verify').style.display = 'block';
+                    document.getElementById('bind-form').classList.add('d-none');
+                    document.getElementById('bind-verify').classList.remove('d-none');
                     showToast('验证码已生成，有效期5分钟', 'success');
                 } else { showToast(data.error || '获取验证码失败', 'error'); }
             } catch (e) { showToast('获取验证码失败: ' + e.message, 'error'); }
@@ -211,14 +213,14 @@
         }
 
         function cancelBind() {
-            document.getElementById('bind-verify').style.display = 'none';
-            document.getElementById('bind-form').style.display = 'block';
+            document.getElementById('bind-verify').classList.add('d-none');
+            document.getElementById('bind-form').classList.remove('d-none');
             document.getElementById('bind-player-name').value = '';
         }
 
         async function unbindPlayer() {
             showModal({title:'确认解除绑定',content:'确定要解除游戏角色绑定吗？',confirmText:'解除',danger:true,onConfirm:function(){
-                (async function(){
+                return (async function(){
                     try {
                         var res = await fetchAPI('/api/auth/unbind', { method: 'POST' });
                         var data = await res.json();
@@ -231,6 +233,7 @@
 
         function changePassword(event) {
             event.preventDefault();
+            if (changePwdLoading) return false;
             var oldPwd = document.getElementById('old-password').value;
             var newPwd = document.getElementById('new-password').value;
             var confirmPwd = document.getElementById('confirm-password').value;
@@ -238,6 +241,9 @@
             if (newPwd.length < 6) { showToast('新密码至少需要6个字符', 'error'); return false; }
             if (newPwd !== confirmPwd) { showToast('两次输入的新密码不一致', 'error'); return false; }
             if (oldPwd === newPwd) { showToast('新密码不能与旧密码相同', 'error'); return false; }
+            changePwdLoading = true;
+            var submitBtn = event.target.querySelector('button[type="submit"]');
+            if (submitBtn) { submitBtn.disabled = true; }
             fetchAPI('/api/auth/change-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -255,7 +261,11 @@
                         document.getElementById('password-strength-text').className = 'text-muted';
                     } else { showToast(d.error || '密码修改失败', 'error'); }
                 })
-                .catch(function(e) { showToast('密码修改失败: ' + e.message, 'error'); });
+                .catch(function(e) { showToast('密码修改失败: ' + e.message, 'error'); })
+                .finally(function() {
+                    changePwdLoading = false;
+                    if (submitBtn) { submitBtn.disabled = false; }
+                });
             return false;
         }
 
@@ -295,6 +305,14 @@
                 onValid: function() {
                     SidebarMenu.initSidebarWithPermission();
                     loadProfile();
+                    var bindPollTimer = setInterval(function() {
+                        var unbindSection = document.getElementById('unbind-section');
+                        if (unbindSection && unbindSection.classList.contains('d-none')) {
+                            loadProfile();
+                        } else {
+                            clearInterval(bindPollTimer);
+                        }
+                    }, 5000);
                 }
             });
         });

@@ -453,9 +453,11 @@
                         updateStatusBanner('', '');
                     }
                     showLoadingOverlay(false);
-                    if (!isRestarting) {
-                        setOperating(false);
+                    if (isRestarting) {
+                        isRestarting = false;
+                        showToast('服务器重启失败，服务器已停止', 'error');
                     }
+                    setOperating(false);
                     break;
                 case 'error':
                     updateStatusBanner('stopped', '<i class="bi bi-exclamation-triangle-fill"></i> <strong>服务器错误</strong> — ' + (data.lastExitError || '未知错误'));
@@ -527,7 +529,7 @@
             return parts.join(' ');
         }
 
-        function showAlert(message, type) {
+        function showLocalAlert(message, type) {
             var alert = document.getElementById('alert-message');
             alert.className = 'alert-message ' + type;
             alert.innerHTML = '<i class="bi bi-' + (type === 'error' ? 'exclamation-circle-fill' : 'check-circle-fill') + '"></i> ' + message;
@@ -810,7 +812,9 @@
 
         async function loadMaps(version) {
             try {
-                var response = await fetchAPI('/api/files/saves');
+                var url = '/api/files/saves';
+                if (version) url += '?version=' + encodeURIComponent(version);
+                var response = await fetchAPI(url);
                 var result = await response.json();
                 var select = document.getElementById('select-map');
                 select.innerHTML = '';
@@ -877,15 +881,15 @@
             var config = document.getElementById('select-config').value;
 
             if (!stateReceived) {
-                showAlert('服务端状态未就绪，无法启动。请稍后刷新页面重试。', 'error');
+                showLocalAlert('服务端状态未就绪，无法启动。请稍后刷新页面重试。', 'error');
                 return;
             }
             if (serverState !== 'off' && serverState !== 'error') {
-                showAlert('服务器当前状态不允许启动:' + serverState, 'error');
+                showLocalAlert('服务器当前状态不允许启动:' + serverState, 'error');
                 return;
             }
             if (!version || !map) {
-                showAlert('请先选择版本和地图', 'error');
+                showLocalAlert('请先选择版本和地图', 'error');
                 return;
             }
 
@@ -896,6 +900,7 @@
                 onConfirm: async function() {
                     setOperating(true);
                     showLoadingOverlay(true);
+                    serverState = 'starting';
                     updateStatusBadge('starting');
                     showConsolePanel();
                     connectWebSocket();
@@ -910,18 +915,18 @@
                         var result = await res.json();
                         if (result.success) {
                             showLoadingOverlay(false);
-                            showAlert('启动请求已发送: ' + (result.data && result.data.message || ''), 'success');
+                            showLocalAlert('启动请求已发送: ' + (result.data && result.data.message || ''), 'success');
                             try { localStorage.setItem('server_running', 'true'); } catch(e) {}
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
                         } else {
-                            showAlert(result.error || '启动失败', 'error');
+                            showLocalAlert(result.error || '启动失败', 'error');
                             updateStatusBadge('error');
                             updateStatusBanner('', '');
                             showLoadingOverlay(false);
                             setOperating(false);
                         }
                     } catch (err) {
-                        showAlert('启动请求失败: ' + err.message, 'error');
+                        showLocalAlert('启动请求失败: ' + err.message, 'error');
                         updateStatusBadge('error');
                         updateStatusBanner('', '');
                         showLoadingOverlay(false);
@@ -933,11 +938,11 @@
 
         async function stopServer() {
             if (!stateReceived) {
-                showAlert('服务端状态未就绪，无法停止。', 'error');
+                showLocalAlert('服务端状态未就绪，无法停止。', 'error');
                 return;
             }
             if (serverState !== 'running' && serverState !== 'starting' && serverState !== 'error') {
-                showAlert('服务器当前不在运行状态: ' + serverState, 'error');
+                showLocalAlert('服务器当前不在运行状态: ' + serverState, 'error');
                 return;
             }
             showModal({
@@ -945,6 +950,7 @@
                 onConfirm: async function() {
                     setOperating(true);
                     showLoadingOverlay(true);
+                    serverState = 'stopping';
                     updateStatusBadge('stopping');
                     updateStatusBanner('stopped', '<i class="bi bi-hourglass-split"></i> <strong>正在停止服务器...</strong>');
 
@@ -952,17 +958,17 @@
                         var res = await fetchAPI('/api/server/stop', { method: 'POST' });
                         var result = await res.json();
                         if (result.success) {
-                            showAlert('停止命令已发送: ' + (result.data && result.data.message || ''), 'success');
+                            showLocalAlert('停止命令已发送: ' + (result.data && result.data.message || ''), 'success');
                             showLoadingOverlay(false);
                             setOperating(false);
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
                         } else {
-                            showAlert(result.error || '停止失败', 'error');
+                            showLocalAlert(result.error || '停止失败', 'error');
                             showLoadingOverlay(false);
                             setOperating(false);
                         }
                     } catch (err) {
-                        showAlert('停止请求失败: ' + err.message, 'error');
+                        showLocalAlert('停止请求失败: ' + err.message, 'error');
                         showLoadingOverlay(false);
                         setOperating(false);
                     }
@@ -972,11 +978,11 @@
 
         async function restartServer() {
             if (!stateReceived) {
-                showAlert('服务端状态未就绪，无法重启。', 'error');
+                showLocalAlert('服务端状态未就绪，无法重启。', 'error');
                 return;
             }
             if (serverState !== 'running') {
-                showAlert('服务器当前不在运行状态: ' + serverState, 'error');
+                showLocalAlert('服务器当前不在运行状态: ' + serverState, 'error');
                 return;
             }
             showModal({
@@ -994,17 +1000,25 @@
                         var res = await fetchAPI('/api/server/restart', { method: 'POST' });
                         var result = await res.json();
                         if (result.success) {
-                            showAlert('重启命令已发送', 'success');
+                            showLocalAlert('重启命令已发送', 'success');
+                            showLoadingOverlay(false);
+                            setOperating(false);
                             try { localStorage.setItem('server_running', 'true'); } catch(e) {}
                             if (typeof SidebarMenu !== 'undefined' && SidebarMenu.refresh) SidebarMenu.refresh();
+                            setTimeout(function() {
+                                if (isRestarting) {
+                                    isRestarting = false;
+                                    showToast('重启超时，请手动检查服务器状态', 'warning');
+                                }
+                            }, 60000);
                         } else {
-                            showAlert(result.error || '重启失败', 'error');
+                            showLocalAlert(result.error || '重启失败', 'error');
                             isRestarting = false;
                             showLoadingOverlay(false);
                             setOperating(false);
                         }
                     } catch (err) {
-                        showAlert('重启失败: ' + err.message, 'error');
+                        showLocalAlert('重启失败: ' + err.message, 'error');
                         isRestarting = false;
                         showLoadingOverlay(false);
                         setOperating(false);
@@ -1015,19 +1029,19 @@
 
         async function saveGame() {
             if (!stateReceived || serverState !== 'running') {
-                showAlert('服务器未在运行，无法保存', 'error');
+                showLocalAlert('服务器未在运行，无法保存', 'error');
                 return;
             }
             try {
                 var res = await fetchAPI('/api/server/save', { method: 'POST' });
                 var result = await res.json();
                 if (result.success) {
-                    showAlert('游戏已保存', 'success');
+                    showLocalAlert('游戏已保存', 'success');
                 } else {
-                    showAlert(result.error || '保存失败', 'error');
+                    showLocalAlert(result.error || '保存失败', 'error');
                 }
             } catch (err) {
-                showAlert('保存请求失败: ' + err.message, 'error');
+                showLocalAlert('保存请求失败: ' + err.message, 'error');
             }
         }
 
@@ -1037,7 +1051,7 @@
         async function uploadMap() {
             var fileInput = document.getElementById('map-upload-input');
             var file = fileInput.files[0];
-            if (!file) { showAlert('请选择要上传的地图文件', 'error'); return; }
+            if (!file) { showLocalAlert('请选择要上传的地图文件', 'error'); return; }
             showLoadingOverlay(true);
             try {
                 var reader = new FileReader();
@@ -1053,12 +1067,12 @@
                 });
                 var result = await res.json();
                 if (result.success) {
-                    showAlert('地图上传成功', 'success');
+                    showLocalAlert('地图上传成功', 'success');
                     closeUploadModal();
                     var version = document.getElementById('select-version').value;
                     if (version) loadMaps(version);
-                } else { showAlert(result.error || '上传失败', 'error'); }
-            } catch (err) { showAlert('上传失败: ' + err.message, 'error'); }
+                } else { showLocalAlert(result.error || '上传失败', 'error'); }
+            } catch (err) { showLocalAlert('上传失败: ' + err.message, 'error'); }
             showLoadingOverlay(false);
         }
 
@@ -1078,12 +1092,12 @@
             var savename = document.getElementById('generate-savename').value.trim();
             var seed = document.getElementById('generate-seed').value.trim();
             var version = document.getElementById('select-version').value;
-            if (!version) { showAlert('请先选择版本', 'error'); return; }
+            if (!version) { showLocalAlert('请先选择版本', 'error'); return; }
             if (savename && !/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(savename)) {
-                showAlert('地图名称只能包含字母、数字、下划线、短横线或中文', 'error'); return;
+                showLocalAlert('地图名称只能包含字母、数字、下划线、短横线或中文', 'error'); return;
             }
             if (seed && !/^-?\d{1,20}$/.test(seed)) {
-                showAlert('种子必须是有效的整数', 'error'); return;
+                showLocalAlert('种子必须是有效的整数', 'error'); return;
             }
             showLoadingOverlay(true);
             try {
@@ -1098,10 +1112,10 @@
                 var result = await res.json();
                 if (result.success) {
                     var sizeInfo = result.data && result.data.size ? '（' + result.data.size + '）' : '';
-                    showAlert('地图生成成功' + sizeInfo + '！', 'success');
+                    showLocalAlert('地图生成成功' + sizeInfo + '！', 'success');
                     closeGenerateModal(); loadMaps(version);
-                } else { showAlert(result.error || '生成失败', 'error'); }
-            } catch (err) { showAlert('生成失败: ' + err.message, 'error'); }
+                } else { showLocalAlert(result.error || '生成失败', 'error'); }
+            } catch (err) { showLocalAlert('生成失败: ' + err.message, 'error'); }
             showLoadingOverlay(false);
         }
 

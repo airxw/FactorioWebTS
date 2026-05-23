@@ -24,7 +24,7 @@
                     <button class="mobile-menu-toggle" id="mobile-menu-toggle">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                     </button>
-                    <button class="btn btn-sm btn-warning" @click="processExpired()">处理过期投票</button>
+                    <button class="btn btn-sm btn-warning" :disabled="processLoading" @click="processExpired()">处理过期投票</button>
                     <button class="btn btn-sm btn-secondary" @click="loadVotes()">刷新</button>
                     <button class="btn btn-sm btn-danger" @click="logout()">退出登录</button>
                 </div>
@@ -49,7 +49,7 @@
                                     <input type="number" class="form-control" x-model="config.cooldown_seconds" min="0" required>
                                 </div>
                                 <div class="form-group d-flex align-items-end">
-                                    <button type="submit" class="btn btn-primary w-100">保存设置</button>
+                                    <button type="submit" class="btn btn-primary w-100" :disabled="saveLoading" x-text="saveLoading ? '保存中...' : '保存设置'">保存设置</button>
                                 </div>
                             </div>
                         </form>
@@ -85,8 +85,8 @@
                                             <td x-text="formatTs(v.created_at)"></td>
                                             <td>
                                                 <button class="btn btn-sm btn-info me-1" @click="showDetail(v.id)">详情</button>
-                                                <button class="btn btn-sm btn-danger me-1" @click="openBan(v.target_player)">封禁</button>
-                                                <button class="btn btn-sm btn-warning" x-show="v.status === 'active'" @click="cancelVote(v.id)">取消</button>
+                                                <button class="btn btn-sm btn-danger me-1" :disabled="banLoading" x-show="v.status === 'active' && v.target_player" @click="openBan(v.target_player)">封禁</button>
+                                                <button class="btn btn-sm btn-warning" :disabled="cancelLoading" x-show="v.status === 'active'" @click="cancelVote(v.id)">取消</button>
                                             </td>
                                         </tr>
                                     </template>
@@ -138,7 +138,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" @click="showBanModal = false">取消</button>
-                <button class="btn btn-danger" @click="doBan()">确认封禁</button>
+                <button class="btn btn-danger" :disabled="banLoading" @click="doBan()">确认封禁</button>
             </div>
         </div>
     </div>
@@ -162,6 +162,10 @@
         detail: null,
         banTarget: '',
         banReason: '',
+        saveLoading: false,
+        banLoading: false,
+        cancelLoading: false,
+        processLoading: false,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -173,38 +177,41 @@
 
         async loadConfig() {
           try {
-            var res = await fetch('/api/vote/config');
+            var res = await fetchAPI('/api/vote/config');
             var data = await res.json();
             if (data.success && data.data) { this.config = data.data; }
-          } catch(e) {}
+          } catch(e) { this.showToast('加载配置失败', 'error'); }
         },
 
         async saveSettings() {
+          if (this.saveLoading) return;
+          this.saveLoading = true;
           try {
-            var res = await fetch('/api/vote/config', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/vote/config', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(this.config)
             });
             var data = await res.json();
             this.showToast(data.success ? '设置保存成功' : (data.error || '保存失败'), data.success ? 'success' : 'error');
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.saveLoading = false; }
         },
 
         async loadVotes() {
           try {
             var params = this.statusFilter ? '?status=' + this.statusFilter : '';
-            var res = await fetch('/api/vote/list' + params, { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/vote/list' + params);
             var data = await res.json();
             this.votes = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载投票失败', 'error'); }
         },
 
         async showDetail(id) {
           try {
-            var res = await fetch('/api/vote/detail/' + id, { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/vote/detail/' + id);
             var data = await res.json();
             if (data.success) { this.detail = data.data; this.showDetailModal = true; }
-          } catch(e) {}
+          } catch(e) { this.showToast('加载详情失败', 'error'); }
         },
 
         openBan(target) {
@@ -215,38 +222,47 @@
 
         async doBan() {
           if (!this.banReason.trim()) { this.showToast('请输入封禁原因', 'warning'); return; }
+          if (this.banLoading) return;
+          this.banLoading = true;
           try {
-            var res = await fetch('/api/vote/ban', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/vote/ban', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ player_name: this.banTarget, reason: this.banReason })
             });
             var data = await res.json();
             this.showToast(data.success ? '封禁成功' : (data.error || '封禁失败'), data.success ? 'success' : 'error');
             if (data.success) { this.showBanModal = false; this.loadVotes(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.banLoading = false; }
         },
 
         async cancelVote(id) {
           var confirmed = await window.showConfirm({ title: '取消投票', content: '确定要取消这个投票吗？', danger: true });
           if (!confirmed) return;
+          if (this.cancelLoading) return;
+          this.cancelLoading = true;
           try {
-            var res = await fetch('/api/vote/cancel', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/vote/cancel', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ vote_id: id })
             });
             var data = await res.json();
             this.showToast(data.success ? '投票已取消' : (data.error || '取消失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadVotes();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.cancelLoading = false; }
         },
 
         async processExpired() {
+          if (this.processLoading) return;
+          this.processLoading = true;
           try {
-            var res = await fetch('/api/vote/process-expired', { method: 'POST', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/vote/process-expired', { method: 'POST' });
             var data = await res.json();
             this.showToast(data.success ? data.message || '处理完成' : (data.error || '处理失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadVotes();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.processLoading = false; }
         },
 
         statusBadge(s) {

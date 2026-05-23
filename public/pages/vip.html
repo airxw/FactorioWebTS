@@ -51,7 +51,7 @@
                                             <td x-text="(l.features && l.features.length > 0) ? l.features.join(', ') : '-'"></td>
                                             <td>
                                                 <button class="btn btn-sm btn-secondary" @click="openEditLevel(l)">编辑</button>
-                                                <button class="btn btn-sm btn-danger" @click="deleteLevel(l.id, l.name)">删除</button>
+                                                <button class="btn btn-sm btn-danger" @click="deleteLevel(l.id, l.name)" :disabled="deleteLevelLoading">删除</button>
                                             </td>
                                         </tr>
                                     </template>
@@ -78,7 +78,7 @@
                             </div>
                             <div class="form-row">
                                 <div class="form-group"><label class="form-label">有效期（天）</label><input type="number" class="form-control" x-model="vipForm.duration_days" min="1" required></div>
-                                <div class="form-group d-flex align-items-end"><button type="submit" class="btn btn-primary w-100">设置用户VIP</button></div>
+                                <div class="form-group d-flex align-items-end"><button type="submit" class="btn btn-primary w-100" :disabled="setVipLoading">设置用户VIP</button></div>
                             </div>
                         </form>
                     </div>
@@ -101,7 +101,7 @@
                                             <td x-text="u.vip_name || '等级' + u.vip_level"></td>
                                             <td x-text="formatTs(u.vip_expiry)"></td>
                                             <td><span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-danger'" x-text="u.status === 'active' ? '活跃' : '过期'"></span></td>
-                                            <td><button class="btn btn-sm btn-danger" @click="removeVip(u.username)">移除VIP</button></td>
+                                            <td><button class="btn btn-sm btn-danger" @click="removeVip(u.username)" :disabled="removeVipLoading">移除VIP</button></td>
                                         </tr>
                                     </template>
                                 </tbody>
@@ -126,7 +126,7 @@
                     <div class="form-group"><label class="form-label">最高品质等级</label><input type="number" class="form-control" x-model="levelForm.max_quality_level" min="0"></div>
                     <div class="form-group"><label class="form-label">描述</label><textarea class="form-control" x-model="levelForm.description" rows="3"></textarea></div>
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary">保存</button>
+                        <button type="submit" class="btn btn-primary" :disabled="saveLevelLoading">保存</button>
                         <button type="button" class="btn btn-secondary" @click="showLevelModal = false">取消</button>
                     </div>
                 </form>
@@ -149,11 +149,15 @@
         vipUsers: [],
         showLevelModal: false,
         editingLevel: null,
-        levelForm: { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '' },
+        levelForm: { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [] },
         vipForm: { username: '', vip_level: '', duration_days: 30 },
         usernameSearchTimeout: null,
         usernameResults: [],
         usernameSearchOpen: false,
+        saveLevelLoading: false,
+        deleteLevelLoading: false,
+        setVipLoading: false,
+        removeVipLoading: false,
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -168,23 +172,23 @@
 
         async loadLevels() {
           try {
-            var res = await fetch('/api/vip/levels');
+            var res = await fetchAPI('/api/vip/levels');
             var data = await res.json();
             this.levels = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载等级失败', 'error'); }
         },
 
         async loadVipUsers() {
           try {
-            var res = await fetch('/api/vip/users', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/vip/users');
             var data = await res.json();
             this.vipUsers = (data.success && data.data) ? data.data : [];
-          } catch(e) {}
+          } catch(e) { this.showToast('加载VIP用户失败', 'error'); }
         },
 
         openCreateLevel() {
           this.editingLevel = null;
-          this.levelForm = { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '' };
+          this.levelForm = { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [] };
           this.showLevelModal = true;
         },
 
@@ -196,13 +200,16 @@
             daily_purchase_limit: l.daily_purchase_limit ?? -1,
             single_purchase_limit: l.single_purchase_limit ?? -1,
             max_quality_level: l.max_quality_level ?? 0,
-            description: (l.features && l.features.length > 0) ? l.features[0] : ''
+            description: l.description || '',
+            features: (l.features && l.features.length > 0) ? l.features.slice() : []
           };
           this.showLevelModal = true;
         },
 
         async saveLevel() {
           if (!this.levelForm.name) { this.showToast('请输入等级名称', 'warning'); return; }
+          if (this.saveLevelLoading) return;
+          this.saveLevelLoading = true;
           var url = '/api/vip/levels';
           var method = 'POST';
           if (this.editingLevel) { url += '/' + this.editingLevel.id; method = 'PUT'; }
@@ -214,29 +221,33 @@
             daily_purchase_limit: this.levelForm.daily_purchase_limit,
             single_purchase_limit: this.levelForm.single_purchase_limit,
             max_quality_level: this.levelForm.max_quality_level,
-            features: this.levelForm.description ? [this.levelForm.description] : []
+            features: this.levelForm.features && this.levelForm.features.length > 0 ? this.levelForm.features : (this.levelForm.description ? [this.levelForm.description] : [])
           };
 
           try {
-            var res = await fetch(url, {
-              method: method, headers: this.authHeaders('application/json'),
+            var res = await fetchAPI(url, {
+              method: method, headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(body)
             });
             var data = await res.json();
             this.showToast(data.success ? (this.editingLevel ? 'VIP等级已更新' : 'VIP等级已创建') : (data.error || '操作失败'), data.success ? 'success' : 'error');
             if (data.success) { this.showLevelModal = false; this.loadLevels(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.saveLevelLoading = false; }
         },
 
         async deleteLevel(id, name) {
           var confirmed = await window.showConfirm({ title: '删除VIP等级', content: '确定删除VIP等级"' + name + '"吗？', danger: true });
           if (!confirmed) return;
+          if (this.deleteLevelLoading) return;
+          this.deleteLevelLoading = true;
           try {
-            var res = await fetch('/api/vip/levels/' + id, { method: 'DELETE', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/vip/levels/' + id, { method: 'DELETE' });
             var data = await res.json();
             this.showToast(data.success ? 'VIP等级已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadAll();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.deleteLevelLoading = false; }
         },
 
         searchUsernames() {
@@ -254,8 +265,8 @@
 
         async _doSearch(keyword) {
           try {
-            var res = await fetch('/api/auth/users/search', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/auth/users/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ keyword: keyword })
             });
             var data = await res.json();
@@ -280,9 +291,11 @@
         async setUserVip() {
           if (!this.vipForm.username) { this.showToast('请输入用户名', 'warning'); return; }
           if (!this.vipForm.vip_level) { this.showToast('请选择VIP等级', 'warning'); return; }
+          if (this.setVipLoading) return;
+          this.setVipLoading = true;
           try {
-            var res = await fetch('/api/vip/set', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/vip/set', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 username: this.vipForm.username,
                 vip_level: Number(this.vipForm.vip_level),
@@ -290,27 +303,35 @@
               })
             });
             var data = await res.json();
-            if (data.success && data.data.code) {
-              this.showToast('VIP提货码: ' + data.data.code + ' | 请在游戏内输入 !claim ' + data.data.code, 'success');
+            if (data.success) {
+              if (data.data && data.data.code) {
+                this.showToast('VIP提货码: ' + data.data.code + ' | 请在游戏内输入 !claim ' + data.data.code, 'success');
+              } else {
+                this.showToast('VIP设置成功', 'success');
+              }
             } else {
-              this.showToast(data.success ? 'VIP已移除' : (data.error || '设置失败'), data.success ? 'success' : 'error');
+              this.showToast(data.error || '设置失败', 'error');
             }
             if (data.success) { this.vipForm.username = ''; this.vipForm.vip_level = ''; this.vipForm.duration_days = 30; this.loadVipUsers(); }
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.setVipLoading = false; }
         },
 
         async removeVip(username) {
           var confirmed = await window.showConfirm({ title: '移除VIP', content: '确定移除 ' + username + ' 的VIP权限吗？', danger: true });
           if (!confirmed) return;
+          if (this.removeVipLoading) return;
+          this.removeVipLoading = true;
           try {
-            var res = await fetch('/api/vip/set', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/vip/set', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ username: username, vip_level: 0 })
             });
             var data = await res.json();
             this.showToast(data.success ? 'VIP已移除' : (data.error || '移除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadVipUsers();
           } catch(e) { this.showToast('网络错误', 'error'); }
+          finally { this.removeVipLoading = false; }
         },
 
         formatTs(ts) {

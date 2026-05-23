@@ -144,7 +144,7 @@
                         <label>按时间清除：删除 N 天前的所有日志</label>
                     </div>
                     <div class="clear-input-row" id="time-clear-options">
-                        <input type="number" id="clear-days" value="30" min="1" max="365" onchange="updateClearPreview()">
+                        <input type="number" id="clear-days" value="30" min="1" max="365" onchange="updateClearPreview()" oninput="syncInput(this)">
                         <span style="color: var(--gray-color); font-size: 0.85rem;">天</span>
                         <input type="range" id="clear-days-slider" value="30" min="1" max="365" oninput="syncSlider(this)">
                     </div>
@@ -232,7 +232,8 @@
 
         // 滚动防抖
         let scrollDebounceTimer = null;
-        let isProgrammaticScroll = false;   // 标记程序触发的滚动，避免误判
+        let isProgrammaticScroll = false;
+        let _refreshing = false;
 
         // ========== 初始化 ==========
         document.addEventListener('DOMContentLoaded', function() {
@@ -386,7 +387,11 @@
 
         // 刷新日志（重置加载）
         function refreshLogs() {
-            loadLogs();
+            if (_refreshing) return;
+            _refreshing = true;
+            loadLogs().finally(function() {
+                setTimeout(function() { _refreshing = false; }, 3000);
+            });
         }
 
         // ========== WebSocket 连接 ==========
@@ -771,6 +776,11 @@
             updateClearPreview();
         }
 
+        function syncInput(input) {
+            document.getElementById('clear-days-slider').value = input.value;
+            updateClearPreview();
+        }
+
         function updateClearPreview() {
             var type = document.querySelector('input[name="clear-type"]:checked').value;
             var estimate = 0;
@@ -807,7 +817,7 @@
                 : (parseInt(document.getElementById('clear-count').value) || 10000);
 
             showModal({title:'确认清除日志',content:'确定要清除 '+document.getElementById('clear-estimate').textContent+' 条日志吗？此操作不可撤销！',confirmText:'清除',danger:true,onConfirm:function(){
-                (async function(){
+                return (async function(){
                     try {
                         var response = await fetchAPI('/api/logs/clear', {
                             method: 'POST',
@@ -838,30 +848,45 @@
         }
 
         // ========== 导出日志 ==========
-        function exportLogs(format) {
-            var logsToExport = filteredLogs.length > 0 ? filteredLogs : currentLogs;
+        async function exportLogs(format) {
+            showToast('正在准备导出数据...', 'info');
+            try {
+                var params = buildQueryParams();
+                params.set('page_size', '100000');
+                var response = await fetchAPI('/api/logs?' + params.toString());
+                var data = await response.json();
 
-            if (logsToExport.length === 0) {
-                showToast('没有可导出的日志', 'warning');
-                return;
+                var logsToExport = [];
+                if (data.success && data.data && data.data.logs) {
+                    logsToExport = data.data.logs;
+                } else {
+                    logsToExport = filteredLogs.length > 0 ? filteredLogs : currentLogs;
+                }
+
+                if (logsToExport.length === 0) {
+                    showToast('没有可导出的日志', 'warning');
+                    return;
+                }
+
+                var content, filename, mimeType;
+
+                if (format === 'txt') {
+                    content = logsToExport.map(function(log) {
+                        return '[' + (log.time || '') + '] [' + (log.level || 'INFO') + '] ' + (log.message || '');
+                    }).join('\n');
+                    filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+                    mimeType = 'text/plain';
+                } else if (format === 'json') {
+                    content = JSON.stringify(logsToExport, null, 2);
+                    filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.json';
+                    mimeType = 'application/json';
+                }
+
+                downloadFile(content, filename, mimeType);
+                showToast('日志已导出 (' + format.toUpperCase() + ')，共 ' + logsToExport.length + ' 条', 'success');
+            } catch (err) {
+                showToast('导出失败: ' + err.message, 'error');
             }
-
-            var content, filename, mimeType;
-
-            if (format === 'txt') {
-                content = logsToExport.map(function(log) {
-                    return '[' + (log.time || '') + '] [' + (log.level || 'INFO') + '] ' + (log.message || '');
-                }).join('\n');
-                filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
-                mimeType = 'text/plain';
-            } else if (format === 'json') {
-                content = JSON.stringify(logsToExport, null, 2);
-                filename = 'factorio-logs-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.json';
-                mimeType = 'application/json';
-            }
-
-            downloadFile(content, filename, mimeType);
-            showToast('日志已导出 (' + format.toUpperCase() + ')', 'success');
         }
 
         function toggleExportDropdown(event) {

@@ -274,7 +274,6 @@
       return {
         tab: 'installed',
         mods: [],
-        filteredMods: [],
         loading: false,
         error: null,
         searchQuery: '',
@@ -286,7 +285,7 @@
         portalLoading: false,
         portalError: null,
         portalPagination: { page: 1, page_count: 1, count: 0 },
-        installingMods: new Set(),
+        installingMods: [],
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -319,7 +318,7 @@
           this.loading = true;
           this.error = null;
           try {
-            var res = await fetch('/api/mod/list', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/mod/list');
             if (!res.ok) {
               if (res.status === 401) { window.location.href = 'login.html'; return; }
               throw new Error('服务器错误: ' + res.status);
@@ -339,8 +338,8 @@
         async toggleMod(id, currentEnabled) {
           this.loading = true;
           try {
-            var res = await fetch('/api/mod/toggle', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/mod/toggle', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ mod_id: id, enabled: !currentEnabled })
             });
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
@@ -360,8 +359,8 @@
           if (!confirmed) return;
           this.loading = true;
           try {
-            var res = await fetch('/api/mod/uninstall', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/mod/uninstall', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ mod_id: id })
             });
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
@@ -378,7 +377,7 @@
 
         async showDeps(id, name) {
           try {
-            var res = await fetch('/api/mod/dependencies/' + id, { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/mod/dependencies/' + id);
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
             var data = await res.json();
             if (data.success && data.data) {
@@ -416,8 +415,8 @@
           if (ids.length === 0) { this.showToast('暂无已安装的模组', 'warning'); return; }
           this.loading = true;
           try {
-            var res = await fetch('/api/mod/check-conflicts', {
-              method: 'POST', headers: this.authHeaders('application/json'),
+            var res = await fetchAPI('/api/mod/check-conflicts', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ mod_ids: ids })
             });
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
@@ -440,7 +439,7 @@
         async checkUpdates() {
           this.loading = true;
           try {
-            var res = await fetch('/api/mod/check-updates', { headers: this.authHeaders() });
+            var res = await fetchAPI('/api/mod/check-updates');
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
             var data = await res.json();
             if (data.success && data.data) {
@@ -467,7 +466,7 @@
         async doSync() {
           this.loading = true;
           try {
-            var res = await fetch('/api/mod/sync', { method: 'POST', headers: this.authHeaders() });
+            var res = await fetchAPI('/api/mod/sync', { method: 'POST' });
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
             var data = await res.json();
             if (data.success) {
@@ -494,7 +493,7 @@
         },
 
         isInstalling(modName) {
-          return this.installingMods.has(modName);
+          return this.installingMods.indexOf(modName) >= 0;
         },
 
         async searchPortal(page) {
@@ -515,9 +514,7 @@
               sort: this.portalSort,
             });
 
-            var res = await fetch('/api/mod/portal/search?' + params.toString(), {
-              headers: this.authHeaders()
-            });
+            var res = await fetchAPI('/api/mod/portal/search?' + params.toString());
 
             if (!res.ok) throw new Error('服务器错误: ' + res.status);
 
@@ -561,12 +558,12 @@
 
           if (!confirmed) return;
 
-          this.installingMods.add(modName);
+          this.installingMods.push(modName);
 
           try {
-            var res = await fetch('/api/mod/portal/install', {
+            var res = await fetchAPI('/api/mod/portal/install', {
               method: 'POST',
-              headers: this.authHeaders('application/json'),
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ mod_name: modName })
             });
 
@@ -587,7 +584,8 @@
             this.showToast(e.message || '安装失败', 'error');
             console.error('[installFromPortal]', e);
           } finally {
-            this.installingMods.delete(modName);
+            var idx = this.installingMods.indexOf(modName);
+            if (idx >= 0) this.installingMods.splice(idx, 1);
           }
         },
 
@@ -595,11 +593,15 @@
           this.portalLoading = true;
 
           try {
-            var res = await fetch('/api/mod/portal/' + encodeURIComponent(modName), {
-              headers: this.authHeaders()
-            });
+            var res = await fetchAPI('/api/mod/portal/' + encodeURIComponent(modName));
 
-            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            if (!res.ok) {
+              if (res.status === 404) {
+                this.showToast('模组不存在: ' + modName, 'warning');
+                return;
+              }
+              throw new Error('服务器错误: ' + res.status);
+            }
 
             var data = await res.json();
 
@@ -632,8 +634,6 @@
               content += '</div>';
 
               window.showAlert({ title: mod.title || mod.name, content: content, large: true });
-            } else if (res.status === 404) {
-              this.showToast('模组不存在: ' + modName, 'warning');
             } else {
               throw new Error(data.error || '获取详情失败');
             }
