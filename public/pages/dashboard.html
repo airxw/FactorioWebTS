@@ -583,6 +583,12 @@
           if (!confirmed) return;
 
           this.installLoading = true;
+          this.installingVersion = version;
+          this.installProgress = 0;
+          this.installStatusText = '准备中...';
+          this.installFailed = false;
+          this.startPollProgress(version);
+
           try {
             var res = await fetchAPI('/api/versions/upgrade', {
               method: 'POST',
@@ -590,17 +596,16 @@
               body: JSON.stringify({ target_version: version, release_type: releaseType })
             });
             var data = await res.json();
-            if (data.success) {
-              this.installingVersion = version;
-              this.installProgress = 0;
-              this.installStatusText = '准备中...';
-              this.installFailed = false;
-              this.startPollProgress(version);
-              this.showToast('版本安装已启动', 'info');
-            } else {
+            if (!data.success) {
               this.showToast(data.error || '安装失败', 'error');
+              this.stopPollProgress();
+              this.installingVersion = '';
             }
-          } catch(e) { this.showToast('网络错误', 'error'); }
+          } catch(e) {
+            this.showToast('网络错误', 'error');
+            this.stopPollProgress();
+            this.installingVersion = '';
+          }
           finally { this.installLoading = false; }
         },
 

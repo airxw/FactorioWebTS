@@ -15,16 +15,16 @@ export interface DbCdkCode {
 const cdkFields = `code, command, status, item_id, player_name, type, user_id, created_at, updated_at`;
 
 export function generateCode(db: Database.Database): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 100; attempt++) {
-    let code = 'FACTORIO_';
-    for (let i = 0; i < 8; i++) {
+    let code = '';
+    for (let i = 0; i < 6; i++) {
       code += chars[Math.floor(Math.random() * chars.length)];
     }
     const exists = db.prepare('SELECT 1 FROM cdk_codes WHERE code = ?').get(code);
     if (!exists) return code;
   }
-  const fallback = `FACTORIO_${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const fallback = Date.now().toString(36).toUpperCase().slice(-6);
   return fallback;
 }
 

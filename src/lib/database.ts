@@ -463,6 +463,20 @@ function ensureSchema(database: Database.Database): void {
     `,
   });
 
+  migrations.push({
+    name: '027_add_delivery_method_to_orders',
+    sql: `
+      ALTER TABLE orders ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'cdk' CHECK(delivery_method IN ('cdk','direct'));
+    `,
+  });
+
+  migrations.push({
+    name: '028_add_cdk_code_to_orders',
+    sql: `
+      ALTER TABLE orders ADD COLUMN cdk_code TEXT;
+    `,
+  });
+
   for (const migration of migrations) {
     if (!appliedSet.has(migration.name)) {
       database.exec(migration.sql);

@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadEnv } from '../config/env.js';
 import { AppError } from '../types/index.js';
+import { getDb } from './database.js';
+import * as versionRepo from '../modules/version/version.repository.js';
 
 export function resolveFactorioRoot(): string {
   const env = loadEnv();
@@ -10,7 +12,17 @@ export function resolveFactorioRoot(): string {
 
 function resolveVersionRoot(version?: string): string {
   const root = resolveFactorioRoot();
-  if (!version) return root;
+  if (!version) {
+    try {
+      const db = getDb();
+      const current = versionRepo.getCurrentVersion(db);
+      if (current) {
+        const candidate = path.resolve(root, 'versions', current.version);
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch {}
+    return root;
+  }
 
   const candidate = path.resolve(root, 'versions', version);
   if (existsSync(candidate)) return candidate;

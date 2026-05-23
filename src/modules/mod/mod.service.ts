@@ -13,14 +13,14 @@ function getConfigDir(): string {
 }
 
 function syncModListJson(): void {
-  const configDir = getConfigDir();
-  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+  const modsDir = resolveModsDir();
+  if (!existsSync(modsDir)) mkdirSync(modsDir, { recursive: true });
 
   const mods = repo.listInstalledMods(getDb())
     .filter(m => m.is_enabled)
     .map(m => ({ name: m.name, enabled: true }));
 
-  const filePath = path.join(configDir, 'mod-list.json');
+  const filePath = path.join(modsDir, 'mod-list.json');
   writeFileSync(filePath, JSON.stringify({ mods }, null, 2) + '\n');
 }
 
@@ -878,7 +878,7 @@ export function syncFromFilesystem(): SyncResult {
 
     const allMods = repo.listInstalledMods(db);
     for (const mod of allMods) {
-      if (mod.file_path && !existingFiles.has(mod.file_path)) {
+      if (mod.file_path && !existsSync(mod.file_path)) {
         console.log(`[syncFromFilesystem] Removing orphan mod record: ${mod.name} (${mod.file_path})`);
         repo.deleteMod(db, mod.id);
         result.removed++;

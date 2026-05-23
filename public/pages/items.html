@@ -47,6 +47,13 @@
                                 <option value="">全部状态</option><option value="active">已启用</option><option value="inactive">已禁用</option>
                             </select>
                         </div>
+                        <div class="batch-actions" x-show="selectedIds.size > 0" x-transition>
+                            <span class="batch-count">已选 <strong x-text="selectedIds.size"></strong> 项</span>
+                            <button class="btn btn-sm btn-outline-success" @click="batchToggle(true)" :disabled="batchLoading"><i class="bi bi-play-fill me-1"></i>批量启用</button>
+                            <button class="btn btn-sm btn-outline-warning" @click="batchToggle(false)" :disabled="batchLoading"><i class="bi bi-pause-fill me-1"></i>批量停用</button>
+                            <button class="btn btn-sm btn-outline-danger" @click="batchDelete()" :disabled="batchLoading"><i class="bi bi-trash me-1"></i>批量删除</button>
+                            <button class="btn btn-sm btn-outline-secondary" @click="clearSelection()"><i class="bi bi-x-lg"></i></button>
+                        </div>
                     </div>
                 </div>
 
@@ -65,22 +72,23 @@
                     </div>
                     <div class="table-responsive" x-show="items.length > 0 || loading">
                         <table class="table mb-0">
-                            <thead><tr><th>ID</th><th>代码</th><th>中文名</th><th>英文名</th><th>分类</th><th>状态</th><th class="text-end">操作</th></tr></thead>
+                            <thead><tr><th style="width:36px"><input type="checkbox" class="batch-checkbox" :checked="isAllSelected" @change="toggleSelectAll($event)"></th><th>ID</th><th>代码</th><th>中文名</th><th>英文名</th><th>分类</th><th>状态</th><th class="text-end">操作</th></tr></thead>
                             <tbody>
-                                <tr x-show="loading"><td colspan="7" class="text-center text-muted p-4">加载中...</td></tr>
+                                <tr x-show="loading"><td colspan="8" class="text-center text-muted p-4">加载中...</td></tr>
                                 <template x-for="item in pagedItems" :key="item.id">
-                                    <tr :class="{ 'table-row-disabled': !item.enabled }">
+                                    <tr :class="{ 'table-row-disabled': !item.enabled, 'row-selected': selectedIds.has(item.id) }">
+                                        <td><input type="checkbox" class="batch-checkbox" :checked="selectedIds.has(item.id)" @change="toggleSelect(item.id, $event)"></td>
                                         <td x-text="item.id"></td>
                                         <td><code x-text="item.code"></code></td>
                                         <td class="fw-medium" x-text="item.name_cn || '--'"></td>
                                         <td><small class="text-muted" x-text="item.name_en || '--'"></small></td>
                                         <td><span class="badge bg-secondary" x-text="catLabel(item.category)"></span></td>
-                                        <td><span class="status-badge-inline" :class="item.enabled ? 'active' : 'inactive'" x-text="item.enabled ? '启用' : '停用'"></span></td>
+                                        <td><span class="status-badge-inline" :class="item.enabled ? 'active' : 'inactive'"><i :class="item.enabled ? 'bi bi-check-circle-fill' : 'bi bi-x-circle-fill'" class="status-dot"></i><span x-text="item.enabled ? '启用' : '停用'"></span></span></td>
                                         <td class="text-end">
                                             <div class="action-btn-group justify-end">
                                                 <button class="btn-icon-sm edit" @click="openEditItem(item)"><i class="bi bi-pencil"></i></button>
                                                 <button class="btn-icon-sm delete" @click="deleteItem(item.id)" :disabled="deleteLoading"><i class="bi bi-trash"></i></button>
-                                                <button class="btn-icon-sm toggle" @click="toggleItem(item.id, item.enabled)" :disabled="toggleLoading"><i :class="item.enabled ? 'bi bi-pause' : 'bi bi-play'"></i></button>
+                                                <button class="btn-icon-sm toggle" @click="toggleItem(item.id, item.enabled)" :disabled="togglingIds.has(item.id)"><i :class="item.enabled ? 'bi bi-pause' : 'bi bi-play'" :style="togglingIds.has(item.id) ? 'animation:spin 0.6s linear infinite' : ''"></i></button>
                                             </div>
                                         </td>
                                     </tr>
@@ -161,7 +169,9 @@
         syncing: false,
         saveLoading: false,
         deleteLoading: false,
-        toggleLoading: false,
+        togglingIds: new Set(),
+        selectedIds: new Set(),
+        batchLoading: false,
 
         init() {
           var self = this;
@@ -311,10 +321,12 @@
         },
 
         async toggleItem(id, enabled) {
-          if (this.toggleLoading) return;
-          this.toggleLoading = true;
+          if (this.togglingIds.has(id)) return;
+          var newSet = new Set(this.togglingIds);
+          newSet.add(id);
+          this.togglingIds = newSet;
           var item = this.items.find(function(i) { return i.id === id; });
-          if (!item) { this.toggleLoading = false; return; }
+          if (!item) { var ns = new Set(this.togglingIds); ns.delete(id); this.togglingIds = ns; return; }
           var payload = { code: item.code, name_cn: item.name_cn || '', name_en: item.name_en || '', enabled: !enabled, price: 0, category: item.category || '', quality_level: item.quality_level || 0 };
           try {
             var res = await fetchAPI('/api/shop/items/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -322,7 +334,81 @@
             this.showToast(data.success ? '状态已切换' : (data.error || '操作失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadAll();
           } catch(e) { this.showToast('网络错误', 'error'); }
-          finally { this.toggleLoading = false; }
+          finally { var ns2 = new Set(this.togglingIds); ns2.delete(id); this.togglingIds = ns2; }
+        },
+
+        get isAllSelected() {
+          return this.pagedItems.length > 0 && this.pagedItems.every(function(item) { return this.selectedIds.has(item.id); }.bind(this));
+        },
+
+        toggleSelect(id, event) {
+          if (event.target.checked) { this.selectedIds.add(id); }
+          else { this.selectedIds.delete(id); }
+          this.selectedIds = new Set(this.selectedIds);
+        },
+
+        toggleSelectAll(event) {
+          var self = this;
+          if (event.target.checked) {
+            this.pagedItems.forEach(function(item) { self.selectedIds.add(item.id); });
+          } else {
+            this.pagedItems.forEach(function(item) { self.selectedIds.delete(item.id); });
+          }
+          this.selectedIds = new Set(this.selectedIds);
+        },
+
+        clearSelection() {
+          this.selectedIds = new Set();
+        },
+
+        async batchToggle(enable) {
+          if (this.batchLoading) return;
+          var ids = Array.from(this.selectedIds);
+          if (ids.length === 0) { this.showToast('请先选择物品', 'warning'); return; }
+          var action = enable ? '启用' : '停用';
+          var confirmed = await window.showConfirm({ title: '批量' + action, content: '确定要批量' + action + ' ' + ids.length + ' 个物品吗？', danger: !enable });
+          if (!confirmed) return;
+          this.batchLoading = true;
+          var successCount = 0;
+          var failCount = 0;
+          for (var i = 0; i < ids.length; i++) {
+            var id = ids[i];
+            var item = this.items.find(function(it) { return it.id === id; });
+            if (!item) { failCount++; continue; }
+            if (item.enabled === enable) { successCount++; continue; }
+            var payload = { code: item.code, name_cn: item.name_cn || '', name_en: item.name_en || '', enabled: enable, price: 0, category: item.category || '', quality_level: item.quality_level || 0 };
+            try {
+              var res = await fetchAPI('/api/shop/items/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+              var data = await res.json();
+              if (data.success) successCount++; else failCount++;
+            } catch(e) { failCount++; }
+          }
+          this.showToast('批量' + action + '完成：成功 ' + successCount + ' 个' + (failCount > 0 ? '，失败 ' + failCount + ' 个' : ''), failCount > 0 ? 'warning' : 'success');
+          this.selectedIds = new Set();
+          this.batchLoading = false;
+          this.loadAll();
+        },
+
+        async batchDelete() {
+          if (this.batchLoading) return;
+          var ids = Array.from(this.selectedIds);
+          if (ids.length === 0) { this.showToast('请先选择物品', 'warning'); return; }
+          var confirmed = await window.showConfirm({ title: '批量删除', content: '确定要批量删除 ' + ids.length + ' 个物品吗？此操作不可恢复！', danger: true });
+          if (!confirmed) return;
+          this.batchLoading = true;
+          var successCount = 0;
+          var failCount = 0;
+          for (var i = 0; i < ids.length; i++) {
+            try {
+              var res = await fetchAPI('/api/shop/items/' + ids[i], { method: 'DELETE' });
+              var data = await res.json();
+              if (data.success) successCount++; else failCount++;
+            } catch(e) { failCount++; }
+          }
+          this.showToast('批量删除完成：成功 ' + successCount + ' 个' + (failCount > 0 ? '，失败 ' + failCount + ' 个' : ''), failCount > 0 ? 'warning' : 'success');
+          this.selectedIds = new Set();
+          this.batchLoading = false;
+          this.loadAll();
         },
 
       };

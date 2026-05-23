@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import * as service from './shop.service.js';
+import * as repo from './shop.repository.js';
 import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import { getDb } from '../../lib/database.js';
 import * as authRepo from '../auth/auth.repository.js';
+import { logger } from '../../lib/logger.js';
 import {
   createItemSchema,
   updateItemSchema,
@@ -117,12 +119,25 @@ export default async function shopRoutes(app: FastifyInstance) {
     try {
       const userId = request.currentUser.user_id;
       const result = service.createOrder(userId, getUserVipLevel(userId), parsed.data);
+
+      if (result.delivery_method === 'direct' && result.order_id) {
+        const item = service.getItemById(parsed.data.item_id);
+        if (item) {
+          try {
+            await service.deliverOrderDirect(result.order_id, result.player_name, item.code, parsed.data.quantity, parsed.data.quality_level);
+          } catch (deliverErr) {
+            logger.warn({ deliverErr, orderId: result.order_id }, '[Shop] Direct delivery failed');
+          }
+        }
+      }
+
       return reply.status(201).send({
         success: true,
         data: {
           code: result.code,
           player_name: result.player_name,
           total_price: result.total_price,
+          delivery_method: result.delivery_method,
         },
       });
     } catch (e) {
@@ -141,9 +156,27 @@ export default async function shopRoutes(app: FastifyInstance) {
       const userId = request.currentUser.user_id;
       const result = service.createBatchOrder(userId, getUserVipLevel(userId), parsed.data);
 
+      if (result.delivery_method === 'direct') {
+        const db = getDb();
+        for (const orderEntry of result.orders) {
+          const order = repo.findOrderById(db, orderEntry.order_id);
+          if (order) {
+            const item = repo.findItemById(db, order.item_id);
+            if (item) {
+              try {
+                await service.deliverOrderDirect(orderEntry.order_id, result.player_name, item.code, order.quantity, order.quality_level);
+              } catch (deliverErr) {
+                logger.warn({ deliverErr, orderId: orderEntry.order_id }, '[Shop] Direct delivery failed for batch order');
+              }
+            }
+          }
+        }
+      }
+
+      const codes = result.orders.map(o => o.code).filter((c): c is string => !!c);
       return reply.status(201).send({
         success: true,
-        data: { codes: result.codes, player_name: result.player_name, total_price: result.total_price, item_count: result.codes.length },
+        data: { codes, player_name: result.player_name, total_price: result.total_price, item_count: result.orders.length, delivery_method: result.delivery_method },
       });
     } catch (e) {
       const err = e as { statusCode?: number; message: string };
@@ -153,10 +186,15 @@ export default async function shopRoutes(app: FastifyInstance) {
 
   app.get('/api/shop/orders/my', { preHandler: [authenticate] }, async (request, reply) => {
     try {
-      const { status } = request.query as { status?: string };
-      const orders = service.getMyOrders(request.currentUser.user_id, status);
+      const { status, search, page, pageSize } = request.query as { status?: string; search?: string; page?: string; pageSize?: string };
+      const result = service.getMyOrders(request.currentUser.user_id, {
+        status,
+        search,
+        page: page ? parseInt(page, 10) : 1,
+        pageSize: pageSize ? parseInt(pageSize, 10) : 10,
+      });
 
-      const data = orders.map((o) => ({
+      const data = result.data.map((o) => ({
         order_id: o.id,
         order_number: o.order_number,
         item_name: o.item_name,
@@ -167,11 +205,13 @@ export default async function shopRoutes(app: FastifyInstance) {
         total_price: o.total_price,
         status: o.status,
         quality_level: o.quality_level,
+        delivery_method: o.delivery_method,
+        cdk_code: o.cdk_code,
         created_at: o.created_at,
         delivered_at: o.delivered_at,
       }));
 
-      return reply.send({ success: true, data });
+      return reply.send({ success: true, data, total: result.total, page: result.page, pageSize: result.pageSize });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message: string };
       return reply.status(err.statusCode || 500).send({ success: false, error: err.message });

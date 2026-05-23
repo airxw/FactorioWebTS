@@ -4,7 +4,7 @@ import * as repo from './config.repository.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 import { AppError } from '../../types/index.js';
-import { resolveConfigDir } from '../../lib/paths.js';
+import { resolveConfigDir, resolveModsDir } from '../../lib/paths.js';
 import { eventBus } from '../../lib/event-bus.js';
 import { MAX_BACKUP_COUNT } from '../../config/constants.js';
 
@@ -22,12 +22,17 @@ function getConfigDir(): string {
   return resolveConfigDir();
 }
 
+function resolveDirForType(fileType: string): string {
+  if (fileType === 'mod-list') return resolveModsDir();
+  return getConfigDir();
+}
+
 export function getConfigFiles() {
-  const configDir = getConfigDir();
   const files: Array<{ type: string; filename: string; path: string; exists: boolean; is_list: boolean }> = [];
 
   for (const [type, info] of Object.entries(CONFIG_FILE_TYPES)) {
-    const filePath = path.join(configDir, info.filename);
+    const dir = resolveDirForType(type);
+    const filePath = path.join(dir, info.filename);
     const fileExists = existsSync(filePath);
 
     files.push({
@@ -46,8 +51,8 @@ export function getConfigFile(fileType: string) {
   const info = CONFIG_FILE_TYPES[fileType];
   if (!info) throw new AppError('未知配置文件类型', 404);
 
-  const configDir = getConfigDir();
-  const filePath = path.join(configDir, info.filename);
+  const dir = resolveDirForType(fileType);
+  const filePath = path.join(dir, info.filename);
 
   if (!existsSync(filePath)) {
     return { content: null, raw: '', filename: info.filename };
@@ -105,8 +110,8 @@ export function restoreBackup(fileType: string, timestamp: string): void {
 
   if (!existsSync(backupFile)) throw new AppError('备份文件不存在', 404);
 
-  const configDir = getConfigDir();
-  const targetPath = path.join(configDir, info.filename);
+  const dir = resolveDirForType(fileType);
+  const targetPath = path.join(dir, info.filename);
 
   copyFileSync(backupFile, targetPath);
 
@@ -163,10 +168,10 @@ export function saveConfigFile(fileType: string, content: string): void {
   const info = CONFIG_FILE_TYPES[fileType];
   if (!info) throw new AppError('未知配置文件类型', 404);
 
-  const configDir = getConfigDir();
-  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+  const dir = resolveDirForType(fileType);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const filePath = path.join(configDir, info.filename);
+  const filePath = path.join(dir, info.filename);
 
   try {
     JSON.parse(content);
@@ -327,12 +332,12 @@ export function applyTemplate(templateId: number): void {
 
   try {
     const config = JSON.parse(tpl.config_json);
-    const configDir = getConfigDir();
-    if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
 
     if (tpl.config_type && CONFIG_FILE_TYPES[tpl.config_type]) {
       const info = CONFIG_FILE_TYPES[tpl.config_type];
-      const filePath = path.join(configDir, info.filename);
+      const dir = resolveDirForType(tpl.config_type);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const filePath = path.join(dir, info.filename);
 
       if (existsSync(filePath)) {
         createBackup(tpl.config_type, filePath);
@@ -345,7 +350,9 @@ export function applyTemplate(templateId: number): void {
     for (const [key, value] of Object.entries(config)) {
       const info = CONFIG_FILE_TYPES[key];
       if (!info) continue;
-      const filePath = path.join(configDir, info.filename);
+      const dir = resolveDirForType(key);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const filePath = path.join(dir, info.filename);
 
       if (existsSync(filePath)) {
         createBackup(key, filePath);

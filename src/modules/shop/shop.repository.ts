@@ -26,7 +26,9 @@ export interface DbOrder {
   quantity: number;
   total_price: number;
   quality_level: number;
-  status: 'pending' | 'delivered' | 'cancelled';
+  status: 'pending' | 'delivered' | 'cancelled' | 'failed';
+  delivery_method: 'cdk' | 'direct';
+  cdk_code: string | null;
   delivered_to_player: string | null;
   delivered_at: number | null;
   rcon_command: string | null;
@@ -51,7 +53,7 @@ export interface DbItemRequest {
 
 const shopFields = `id, name, name_cn, name_en, code, category, description, price, stock, quality_max, is_active, image_url, created_at, updated_at`;
 
-const orderFields = `id, order_number, user_id, item_id, player_name, quantity, total_price, quality_level, status, delivered_to_player, delivered_at, rcon_command, created_at, updated_at`;
+const orderFields = `id, order_number, user_id, item_id, player_name, quantity, total_price, quality_level, status, delivery_method, cdk_code, delivered_to_player, delivered_at, rcon_command, created_at, updated_at`;
 
 const itemRequestFields = `id, user_id, item_id, code, name, name_cn, requester, status, quantity, quality_level, created_at, updated_at`;
 
@@ -189,16 +191,18 @@ export function createOrder(
     quantity: number;
     total_price: number;
     quality_level: number;
+    delivery_method: 'cdk' | 'direct';
+    cdk_code?: string | null;
   }
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const orderNumber = generateOrderNumber();
   const result = db
     .prepare(
-      `INSERT INTO orders (order_number, user_id, item_id, player_name, quantity, total_price, quality_level, created_at, updated_at)
-       VALUES (@order_number, @user_id, @item_id, @player_name, @quantity, @total_price, @quality_level, @created_at, @updated_at)`
+      `INSERT INTO orders (order_number, user_id, item_id, player_name, quantity, total_price, quality_level, delivery_method, cdk_code, created_at, updated_at)
+       VALUES (@order_number, @user_id, @item_id, @player_name, @quantity, @total_price, @quality_level, @delivery_method, @cdk_code, @created_at, @updated_at)`
     )
-    .run({ order_number: orderNumber, ...data, created_at: now, updated_at: now });
+    .run({ order_number: orderNumber, ...data, cdk_code: data.cdk_code ?? null, created_at: now, updated_at: now });
   return Number(result.lastInsertRowid);
 }
 
@@ -291,7 +295,7 @@ export function updateOrderStatus(
 
 export function findOrdersWithItems(
   db: Database.Database,
-  options?: { userId?: number; status?: string; limit?: number }
+  options?: { userId?: number; status?: string; search?: string; limit?: number; offset?: number }
 ): Array<DbOrder & { item_name: string; item_code: string; item_category: string }> {
   let sql = `SELECT o.*, i.name as item_name, i.code as item_code, i.category as item_category
              FROM orders o LEFT JOIN shop_items i ON o.item_id = i.id`;
@@ -308,6 +312,11 @@ export function findOrdersWithItems(
     params.status = options.status;
   }
 
+  if (options?.search) {
+    conditions.push('(o.order_number LIKE @search OR i.name LIKE @search OR o.player_name LIKE @search OR i.code LIKE @search)');
+    params.search = '%' + options.search + '%';
+  }
+
   if (conditions.length > 0) {
     sql += ' WHERE ' + conditions.join(' AND ');
   }
@@ -316,9 +325,41 @@ export function findOrdersWithItems(
 
   if (options?.limit) {
     sql += ` LIMIT ${options.limit}`;
+    if (options.offset) sql += ` OFFSET ${options.offset}`;
   }
 
   return (db.prepare(sql).all(params) as Array<DbOrder & { item_name: string; item_code: string; item_category: string }>);
+}
+
+export function countOrdersWithItems(
+  db: Database.Database,
+  options?: { userId?: number; status?: string; search?: string }
+): number {
+  let sql = `SELECT COUNT(*) as cnt FROM orders o LEFT JOIN shop_items i ON o.item_id = i.id`;
+  const params: Record<string, unknown> = {};
+  const conditions: string[] = [];
+
+  if (options?.userId) {
+    conditions.push('o.user_id = @userId');
+    params.userId = options.userId;
+  }
+
+  if (options?.status) {
+    conditions.push('o.status = @status');
+    params.status = options.status;
+  }
+
+  if (options?.search) {
+    conditions.push('(o.order_number LIKE @search OR i.name LIKE @search OR o.player_name LIKE @search OR i.code LIKE @search)');
+    params.search = '%' + options.search + '%';
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  const row = db.prepare(sql).get(params) as { cnt: number };
+  return row.cnt;
 }
 
 export function findItemRequests(

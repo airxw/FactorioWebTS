@@ -2698,11 +2698,16 @@ textarea.form-control {
 .status-badge-inline {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   padding: 3px 10px;
   border-radius: 20px;
   font-size: 0.72rem;
   font-weight: 600;
+}
+
+.status-badge-inline .status-dot {
+  font-size: 0.65rem;
+  line-height: 1;
 }
 
 .status-badge-inline.active {
@@ -3343,7 +3348,15 @@ textarea.form-control {
 .modal-dialog {
   position: relative;
   margin: 0 auto;
-  pointer-events: none;
+  pointer-events: auto;
+  background: var(--color-surface);
+  border-radius: var(--border-radius);
+  width: 90%;
+  max-width: 480px;
+  box-shadow: var(--shadow-lg);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: scaleIn 0.2s var(--anim-easing);
 }
 
 .modal-content .modal-dialog {
@@ -7762,4 +7775,42 @@ textarea.form-control {
   font-size: 2.5rem;
   display: block;
   margin-bottom: 8px;
+}
+
+.batch-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color, #6c5ce7);
+  vertical-align: middle;
+}
+
+.batch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  padding: 4px 12px;
+  background: rgba(108, 92, 231, 0.08);
+  border: 1px solid rgba(108, 92, 231, 0.2);
+  border-radius: 8px;
+}
+
+.batch-count {
+  font-size: 0.8rem;
+  color: var(--primary-color, #6c5ce7);
+  white-space: nowrap;
+}
+
+tr.row-selected {
+  background: rgba(108, 92, 231, 0.06) !important;
+}
+
+tr.row-selected:hover {
+  background: rgba(108, 92, 231, 0.1) !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

@@ -10,7 +10,10 @@ import type {
 import { AppError } from '../../types/index.js';
 import { sendGameCommand } from '../../lib/game-command-bus.js';
 import { logger } from '../../lib/logger.js';
-import { createShopCdk } from '../cdk/cdk.service.js';
+import { createShopCdk, buildShopCommand } from '../cdk/cdk.service.js';
+import * as authRepo from '../auth/auth.repository.js';
+
+import * as vipRepo from '../vip/vip.repository.js';
 
 const GITHUB_ITEMS_URL = 'https://raw.githubusercontent.com/airxw/factorioitem/main/items.json';
 
@@ -28,17 +31,6 @@ const qualityMultipliers: Record<number, number> = {
   5: 5,
 };
 
-const vipConfigs: Record<
-  number,
-  { daily_purchase_limit: number; single_purchase_limit: number; max_quality_level: number }
-> = {
-  0: { daily_purchase_limit: 5, single_purchase_limit: 10, max_quality_level: 1 },
-  1: { daily_purchase_limit: 10, single_purchase_limit: 20, max_quality_level: 1 },
-  2: { daily_purchase_limit: 15, single_purchase_limit: 30, max_quality_level: 2 },
-  3: { daily_purchase_limit: 20, single_purchase_limit: 50, max_quality_level: 3 },
-  4: { daily_purchase_limit: 30, single_purchase_limit: 100, max_quality_level: 4 },
-};
-
 function checkVipLimits(
   user: { vip_level?: number; id?: number },
   item: DbShopItem,
@@ -46,29 +38,32 @@ function checkVipLimits(
   quality: number
 ): { allowed: boolean; reason?: string } {
   const vipLevel = user.vip_level ?? 0;
-  const config = vipConfigs[vipLevel] ?? vipConfigs[0];
+  const db = getDb();
+  const vipRow = vipRepo.findLevelByLevel(db, vipLevel);
+  const config = vipRow
+    ? { daily_purchase_limit: vipRow.daily_purchase_limit, single_purchase_limit: vipRow.single_purchase_limit, max_quality_level: vipRow.max_quality_level }
+    : { daily_purchase_limit: 5, single_purchase_limit: 10, max_quality_level: 1 };
 
   if (quantity > config.single_purchase_limit) {
     return {
       allowed: false,
-      reason: `VIP${vipLevel} max single purchase: ${config.single_purchase_limit}`,
+      reason: `VIP${vipLevel} 单次限购 ${config.single_purchase_limit} 个`,
     };
   }
 
   if (quality > config.max_quality_level) {
     return {
       allowed: false,
-      reason: `VIP${vipLevel} max quality level: ${config.max_quality_level}`,
+      reason: `VIP${vipLevel} 最高可购买品质等级 ${config.max_quality_level}`,
     };
   }
 
   if (user.id) {
-    const db = getDb();
     const todayCount = repo.countUserOrdersToday(db, user.id);
     if (todayCount >= config.daily_purchase_limit) {
       return {
         allowed: false,
-        reason: `VIP${vipLevel} daily limit ${config.daily_purchase_limit} reached`,
+        reason: `VIP${vipLevel} 今日限购 ${config.daily_purchase_limit} 次已用完`,
       };
     }
   }
@@ -162,7 +157,7 @@ export function createOrder(
   userId: number,
   userVipLevel: number,
   data: CreateOrderInput
-): { code: string; player_name: string; total_price: number } {
+): { order_id: number; code?: string; player_name: string; total_price: number; delivery_method: string } {
   const db = getDb();
 
   const item = repo.findItemById(db, data.item_id);
@@ -184,21 +179,62 @@ export function createOrder(
 
   const multiplier = qualityMultipliers[data.quality_level] ?? 1;
   const totalPrice = Math.round(item.price * data.quantity * multiplier * 100) / 100;
+  const deliveryMethod = data.delivery_method || 'cdk';
 
-  const code = createShopCdk(userId, item, data.quantity, data.quality_level, data.player_name);
+  let playerName = data.player_name || '';
+  let code: string | undefined;
 
-  return { code, player_name: data.player_name, total_price: totalPrice };
+  if (deliveryMethod === 'direct') {
+    const user = authRepo.findUserById(db, userId);
+    if (!user || !user.game_id) {
+      throw new AppError('请先在个人中心绑定游戏角色后再使用直接发送方式', 400);
+    }
+    playerName = user.game_id;
+  }
+
+  if (deliveryMethod === 'cdk') {
+    code = createShopCdk(userId, item, data.quantity, data.quality_level, playerName);
+  }
+
+  const orderId = repo.createOrder(db, {
+    user_id: userId,
+    item_id: data.item_id,
+    player_name: playerName,
+    quantity: data.quantity,
+    total_price: totalPrice,
+    quality_level: data.quality_level,
+    delivery_method: deliveryMethod,
+    cdk_code: code ?? null,
+  });
+
+  return { order_id: orderId, code, player_name: playerName, total_price: totalPrice, delivery_method: deliveryMethod };
+}
+
+export async function deliverOrderDirect(orderId: number, playerName: string, itemCode: string, quantity: number, qualityLevel: number): Promise<void> {
+  const command = `/give ${playerName} ${itemCode} ${quantity}${qualityLevel > 1 ? ' quality=' + qualityLevel : ''}`;
+  await deliverOrder(orderId, playerName, command);
 }
 
 export function createBatchOrder(
   userId: number,
   userVipLevel: number,
   data: CreateOrderBatchInput
-): { codes: string[]; player_name: string; total_price: number } {
+): { orders: Array<{ order_id: number; code?: string }>; player_name: string; total_price: number; delivery_method: string } {
   const db = getDb();
 
-  const codes: string[] = [];
+  const orders: Array<{ order_id: number; code?: string }> = [];
   let totalPrice = 0;
+  const deliveryMethod = data.delivery_method || 'cdk';
+
+  let playerName = data.player_name || '';
+
+  if (deliveryMethod === 'direct') {
+    const user = authRepo.findUserById(db, userId);
+    if (!user || !user.game_id) {
+      throw new AppError('请先在个人中心绑定游戏角色后再使用直接发送方式', 400);
+    }
+    playerName = user.game_id;
+  }
 
   for (const entry of data.items) {
     const item = repo.findItemById(db, entry.item_id);
@@ -222,19 +258,39 @@ export function createBatchOrder(
     const price = Math.round(item.price * entry.quantity * multiplier * 100) / 100;
     totalPrice += price;
 
-    const code = createShopCdk(userId, item, entry.quantity, entry.quality_level, data.player_name || '');
-    codes.push(code);
+    let code: string | undefined;
+    if (deliveryMethod === 'cdk') {
+      code = createShopCdk(userId, item, entry.quantity, entry.quality_level, playerName);
+    }
+
+    const orderId = repo.createOrder(db, {
+      user_id: userId,
+      item_id: entry.item_id,
+      player_name: playerName,
+      quantity: entry.quantity,
+      total_price: price,
+      quality_level: entry.quality_level,
+      delivery_method: deliveryMethod,
+      cdk_code: code ?? null,
+    });
+
+    orders.push({ order_id: orderId, code });
   }
 
-  return { codes, player_name: data.player_name || '', total_price: Math.round(totalPrice * 100) / 100 };
+  return { orders, player_name: playerName, total_price: Math.round(totalPrice * 100) / 100, delivery_method: deliveryMethod };
 }
 
 export function getMyOrders(
   userId: number,
-  status?: string
-): Array<DbOrder & { item_name: string; item_code: string; item_category: string }> {
+  options?: { status?: string; search?: string; page?: number; pageSize?: number }
+): { data: Array<DbOrder & { item_name: string; item_code: string; item_category: string }>; total: number; page: number; pageSize: number } {
   const db = getDb();
-  return repo.findOrdersWithItems(db, { userId, status, limit: 50 });
+  const page = options?.page || 1;
+  const pageSize = options?.pageSize || 10;
+  const offset = (page - 1) * pageSize;
+  const total = repo.countOrdersWithItems(db, { userId, status: options?.status, search: options?.search });
+  const data = repo.findOrdersWithItems(db, { userId, status: options?.status, search: options?.search, limit: pageSize, offset });
+  return { data, total, page, pageSize };
 }
 
 export function validateOrder(

@@ -63,7 +63,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="d-flex gap-2 flex-wrap">
+                        <div class="d-flex gap-2">
                             <button class="btn btn-sm btn-outline-warning" @click="toggleBackupPanel()">
                                 <i class="bi bi-clock-history me-1"></i><span x-text="showBackupPanel ? '收起备份' : '备份历史 (' + (backups.length || 0) + ')'"></span>
                             </button>
@@ -174,10 +174,11 @@
         </div>
     </div>
 
-    <div class="modal-overlay" x-show="showTemplateModal" @click.self="showTemplateModal = false" :style="{ display: showTemplateModal ? 'flex' : 'none' }">
-        <div class="modal-dialog">
-            <div class="modal-header"><h3>创建配置模板</h3><button class="modal-close" @click="showTemplateModal = false">&times;</button></div>
-            <div class="modal-body">
+    <template x-if="showTemplateModal">
+    <div class="modal-overlay" style="display:flex;" @click.self="showTemplateModal = false">
+        <div class="modal-box">
+            <div class="modal-box-header"><h3>创建配置模板</h3><button class="modal-box-close" @click="showTemplateModal = false">&times;</button></div>
+            <div class="modal-box-body">
                 <form @submit.prevent="createTemplate()">
                     <div class="form-group">
                         <label class="form-label">模板名称 <span class="required-star">*</span></label>
@@ -208,6 +209,7 @@
             </div>
         </div>
     </div>
+    </template>
 
     <div id="toast-container" class="toast-container"></div>
 

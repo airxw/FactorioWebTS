@@ -304,11 +304,7 @@
             });
             var data = await res.json();
             if (data.success) {
-              if (data.data && data.data.code) {
-                this.showToast('VIP提货码: ' + data.data.code + ' | 请在游戏内输入 !claim ' + data.data.code, 'success');
-              } else {
-                this.showToast('VIP设置成功', 'success');
-              }
+              this.showToast('VIP设置成功', 'success');
             } else {
               this.showToast(data.error || '设置失败', 'error');
             }

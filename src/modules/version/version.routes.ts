@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { authenticate, requireAdmin } from '../../plugins/auth-guard.js';
 import * as service from './version.service.js';
 import { versionUpgradeSchema } from './version.schema.js';
+import { logger } from '../../lib/logger.js';
 
 export default async function versionRoutes(app: FastifyInstance) {
   app.get('/api/versions', { preHandler: [authenticate] }, async (request, reply) => {
@@ -26,13 +27,19 @@ export default async function versionRoutes(app: FastifyInstance) {
   app.post('/api/versions/upgrade', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
     const parsed = versionUpgradeSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
-    try {
-      await service.installVersion(parsed.data.target_version, parsed.data.release_type);
-      return reply.send({ success: true, message: '版本安装中' });
-    } catch (e: unknown) {
-      const err = e as { statusCode?: number; message: string };
-      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+
+    const { target_version, release_type } = parsed.data;
+    const currentProgress = service.getInstallProgress(target_version);
+    if (currentProgress.progress > 0 && currentProgress.progress < 100) {
+      return reply.status(409).send({ success: false, error: '该版本正在安装中' });
     }
+
+    service.installVersion(target_version, release_type).catch((e: unknown) => {
+      const err = e as { statusCode?: number; message: string };
+      logger.error({ err: e, version: target_version }, '[Version] Background install failed');
+    });
+
+    return reply.send({ success: true, message: '版本安装已启动' });
   });
 
   app.post('/api/versions/set-default', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {

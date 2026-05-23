@@ -25,9 +25,10 @@ export const updateItemSchema = z.object({
 
 export const createOrderSchema = z.object({
   item_id: z.number().int().positive(),
-  player_name: z.string().min(1),
+  player_name: z.string().optional(),
   quantity: z.number().int().min(1).optional().default(1),
   quality_level: z.number().int().min(1).max(5).optional().default(1),
+  delivery_method: z.enum(['cdk', 'direct']).optional().default('cdk'),
 });
 
 export const createOrderBatchSchema = z.object({
@@ -40,7 +41,8 @@ export const createOrderBatchSchema = z.object({
       })
     )
     .min(1),
-  player_name: z.string().min(1).optional(),
+  player_name: z.string().optional(),
+  delivery_method: z.enum(['cdk', 'direct']).optional().default('cdk'),
 });
 
 export type CreateItemInput = z.infer<typeof createItemSchema>;
