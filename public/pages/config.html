@@ -129,6 +129,70 @@
                                 <textarea id="config-textarea" class="config-editor" spellcheck="false" x-model="configContent" @input="onContentChange()" style="width:100%;resize:vertical;"></textarea>
                             </div>
                         </div>
+                        <div x-show="editorMode === 'modlist' && activeConfig === 'mod-list'">
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                    <h3 class="card-title mb-0">已安装模组列表</h3>
+                                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                                        <div class="input-group input-group-sm" style="width: 250px;">
+                                            <span class="input-group-text"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span>
+                                            <input type="text" class="form-control" placeholder="搜索模组名称、版本、作者..." x-model="modListSearchQuery" @input="modListSearchQuery = $event.target.value">
+                                        </div>
+                                        <select class="form-select form-select-sm" style="width: auto;" x-model="modListFilterStatus">
+                                            <option value="all">全部状态</option>
+                                            <option value="enabled">已启用</option>
+                                            <option value="disabled">已禁用</option>
+                                            <option value="has_update">有更新</option>
+                                        </select>
+                                        <span class="badge badge-info" x-text="'共 ' + filteredModListMods.length + ' / ' + modListMods.length + ' 个模组'"></span>
+                                    </div>
+                                    <div class="d-flex gap-2 mt-2">
+                                        <button class="btn btn-secondary btn-sm" @click="loadModListMods()" :disabled="modListLoading">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                            刷新
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <div x-show="modListLoading" class="text-center p-4" style="grid-column:1/-1;">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">加载中...</span>
+                                        </div>
+                                        <p class="mt-2 text-muted">正在加载数据，请稍候...</p>
+                                    </div>
+                                    <div x-show="modListError && !modListLoading" class="alert alert-danger" style="grid-column:1/-1;">
+                                        <strong>错误:</strong> <span x-text="modListError"></span>
+                                        <button class="btn btn-sm btn-outline-danger ms-2" @click="loadModListMods()">重试</button>
+                                    </div>
+                                    <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--spacing-lg);" x-show="!modListLoading">
+                                        <div x-show="filteredModListMods.length === 0 && modListMods.length > 0" class="text-center p-4" style="grid-column:1/-1;">
+                                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="text-muted mb-3"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                            <p class="text-muted">未找到匹配的模组</p>
+                                            <button class="btn btn-sm btn-outline-secondary" @click="modListSearchQuery = ''; modListFilterStatus = 'all'">清除筛选</button>
+                                        </div>
+                                        <div x-show="modListMods.length === 0 && !modListError" class="text-center p-4" style="grid-column:1/-1;">暂无已安装的模组</div>
+                                        <template x-for="m in filteredModListMods" :key="m.id">
+                                            <div class="card">
+                                                <div class="card-body">
+                                                    <h4 class="mb-2" x-text="m.name"></h4>
+                                                    <div class="mb-2"><span class="badge badge-info" x-text="m.version"></span></div>
+                                                    <p class="text-muted mb-3" x-text="m.description || '暂无描述'"></p>
+                                                    <div class="mb-3">
+                                                        <span class="badge" :class="m.enabled ? 'badge-success' : 'badge-warning'" x-text="m.enabled ? '已启用' : '已禁用'"></span>
+                                                        <span class="badge badge-danger ml-1" x-show="m.has_update">有更新</span>
+                                                    </div>
+                                                    <div class="d-flex gap-2">
+                                                        <button class="btn btn-sm btn-secondary" @click="toggleModListMod(m.id, m.enabled)" x-text="m.enabled ? '禁用' : '启用'"></button>
+                                                        <button class="btn btn-sm btn-info" @click="showModListDeps(m.id, m.name)">依赖</button>
+                                                        <button class="btn btn-sm btn-danger" @click="uninstallModListMod(m.id, m.name)">卸载</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <div x-show="editorError" class="config-alert config-alert-error">
                             <i class="bi bi-exclamation-triangle-fill me-2"></i><span x-text="editorError"></span>
                         </div>
@@ -332,6 +396,12 @@
         backupsLoading: false,
         saveLoading: false,
         validateLoading: false,
+        modListMods: [],
+        modListLoading: false,
+        modListError: null,
+        modListSearchQuery: '',
+        modListFilterStatus: 'all',
+        modListInstallingMods: [],
 
         init() {
           SidebarMenu.initSidebarWithPermission();
@@ -387,6 +457,12 @@
           if (!isSameConfig) this.editorMode = 'visual';
           var ft = this.fileTypes.find(function(t) { return t.key === key; });
           this.configFileName = ft ? ft.filename : (key + '.json');
+
+          if (key === 'mod-list') {
+            this.editorMode = 'modlist';
+            await this.loadModListMods();
+            return;
+          }
 
           // 如果是同一配置，并且已有数据，先从表单收集当前数据，再渲染（不重新从服务器拉取）
           if (isSameConfig && this.visualData && Object.keys(this.visualData).length > 0) {
@@ -471,9 +547,9 @@
             } catch(e) { this.showToast('收集可视化数据失败', 'error'); }
           }
         },
-
         getFormDef() {
           var fn = this.configFileName;
+          if (fn === 'mod-list.json') return { sections: [{ id:'modlist',title:'Mod 列表',icon:'puzzle',fields:[{ key:'_modlist',label:'Mod 配置',type:'modlist_special',desc:'' }] }] };
           if (CONFIG_FORM_DEFS[fn]) return CONFIG_FORM_DEFS[fn];
           return { sections: [{ id:'json',title:'JSON',icon:'braces',fields:[{ key:'_raw',label:'配置',type:'rawjson',desc:'无可视化编辑器' }] }] };
         },
@@ -640,6 +716,13 @@
         },
 
         collectVisualData() {
+          if (this.configFileName === 'mod-list.json') {
+            var mods = this.modListMods.map(function(m) {
+              return { name: m.name, enabled: m.enabled };
+            });
+            return { mods: mods };
+          }
+
           var formDef = this.getFormDef();
           var rawData = JSON.parse(JSON.stringify(this.visualData || {}));
           var isList = ['server-adminlist.json','server-banlist.json','server-whitelist.json','mod-list.json'].indexOf(this.configFileName) >= 0;
@@ -742,7 +825,7 @@
           if (this.validateLoading) return;
           this.validateLoading = true;
           var contentStr;
-          if (this.editorMode === 'visual') {
+          if (this.editorMode === 'visual' || this.editorMode === 'modlist') {
             contentStr = JSON.stringify(this.collectVisualData(), null, 2);
           } else {
             contentStr = this.configContent.trim();
@@ -802,7 +885,7 @@
           if (this.saveLoading) return;
           this.saveLoading = true;
           var contentStr;
-          if (this.editorMode === 'visual') {
+          if (this.editorMode === 'visual' || this.editorMode === 'modlist') {
             var collectedData = this.collectVisualData();
             contentStr = JSON.stringify(collectedData, null, 2);
           } else {
@@ -1064,6 +1147,124 @@
           if (bytes < 1024) return bytes + ' B';
           if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
           return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        },
+
+        get filteredModListMods() {
+          var query = this.modListSearchQuery.toLowerCase().trim();
+          var status = this.modListFilterStatus;
+          return this.modListMods.filter(function(m) {
+            var matchesSearch = !query ||
+              m.name.toLowerCase().indexOf(query) !== -1 ||
+              (m.display_name || m.name).toLowerCase().indexOf(query) !== -1 ||
+              m.version.toLowerCase().indexOf(query) !== -1 ||
+              (m.author || '').toLowerCase().indexOf(query) !== -1 ||
+              (m.description || '').toLowerCase().indexOf(query) !== -1;
+            var matchesStatus = status === 'all' ||
+              (status === 'enabled' && m.enabled) ||
+              (status === 'disabled' && !m.enabled) ||
+              (status === 'has_update' && m.has_update);
+            return matchesSearch && matchesStatus;
+          });
+        },
+
+        async loadModListMods() {
+          this.modListLoading = true;
+          this.modListError = null;
+          try {
+            var res = await fetchAPI('/api/mod/list');
+            if (!res.ok) {
+              if (res.status === 401) { window.location.href = 'login.html'; return; }
+              throw new Error('服务器错误: ' + res.status);
+            }
+            var data = await res.json();
+            this.modListMods = (data.success && data.data) ? data.data : [];
+            if (!data.success) throw new Error(data.error || '加载失败');
+          } catch(e) {
+            this.modListError = e.message || '加载模组列表失败，请检查网络连接';
+            this.showToast(this.modListError, 'error');
+            console.error('[loadModListMods]', e);
+          } finally {
+            this.modListLoading = false;
+          }
+        },
+
+        async toggleModListMod(id, currentEnabled) {
+          this.modListLoading = true;
+          try {
+            var res = await fetchAPI('/api/mod/toggle', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mod_id: id, enabled: !currentEnabled })
+            });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            this.showToast(data.success ? '模组状态已切换' : (data.error || '操作失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadModListMods();
+          } catch(e) {
+            this.showToast(e.message || '网络错误，请稍后重试', 'error');
+            console.error('[toggleModListMod]', e);
+          } finally {
+            this.modListLoading = false;
+          }
+        },
+
+        async uninstallModListMod(id, name) {
+          var confirmed = await window.showConfirm({ title: '卸载模组', content: '确定要卸载模组"' + name + '"吗？此操作不可撤销。', danger: true });
+          if (!confirmed) return;
+          this.modListLoading = true;
+          try {
+            var res = await fetchAPI('/api/mod/uninstall', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mod_id: id })
+            });
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            this.showToast(data.success ? '模组已卸载' : (data.error || '卸载失败'), data.success ? 'success' : 'error');
+            if (data.success) this.loadModListMods();
+          } catch(e) {
+            this.showToast(e.message || '卸载失败，请稍后重试', 'error');
+            console.error('[uninstallModListMod]', e);
+          } finally {
+            this.modListLoading = false;
+          }
+        },
+
+        async showModListDeps(id, name) {
+          try {
+            var res = await fetchAPI('/api/mod/dependencies/' + id);
+            if (!res.ok) throw new Error('服务器错误: ' + res.status);
+            var data = await res.json();
+            if (data.success && data.data) {
+              var required = data.data.required || [];
+              var optional = data.data.optional || [];
+              if (required.length === 0 && optional.length === 0) {
+                window.showAlert({ title: name + '的依赖', content: '该模组无依赖' });
+                return;
+              }
+              var lines = [];
+              if (required.length > 0) {
+                lines.push('<strong>【必需依赖】</strong>');
+                required.forEach(function(d) {
+                  lines.push('  • ' + escapeHtml(d.name || '未知') + (d.installed ? ' <span class="badge badge-success">已安装</span>' : ' <span class="badge badge-danger">未安装</span>'));
+                });
+              }
+              if (optional.length > 0) {
+                lines.push('<strong>【可选依赖】</strong>');
+                optional.forEach(function(d) {
+                  lines.push('  • ' + escapeHtml(d.name || '未知') + (d.installed ? ' <span class="badge badge-success">已安装</span>' : ' <span class="badge badge-warning">未安装</span>'));
+                });
+              }
+              window.showAlert({ title: name + '的依赖', content: lines.join('<br>') });
+            } else {
+              window.showAlert({ title: name + '的依赖', content: data.error || '获取依赖信息失败' });
+            }
+          } catch(e) {
+            this.showToast(e.message || '获取依赖信息失败', 'error');
+            console.error('[showModListDeps]', e);
+          }
+        },
+
+        isModListInstalling(modName) {
+          return this.modListInstallingMods.indexOf(modName) >= 0;
         }
       };
       console.log('🔧 [DEBUG] appData 对象创建完成，准备返回');

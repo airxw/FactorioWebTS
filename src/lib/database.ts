@@ -477,6 +477,38 @@ function ensureSchema(database: Database.Database): void {
     `,
   });
 
+  migrations.push({
+    name: '029_add_type_to_trigger_responses',
+    sql: `
+      ALTER TABLE trigger_responses ADD COLUMN type TEXT NOT NULL DEFAULT 'custom';
+    `,
+  });
+
+  migrations.push({
+    name: '030_create_chat_feature_toggles',
+    sql: `
+      CREATE TABLE IF NOT EXISTS chat_feature_toggles (
+        feature_key TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        keywords TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL
+      )
+    `,
+  });
+
+  migrations.push({
+    name: '031_seed_chat_feature_toggles',
+    sql: `
+      INSERT INTO chat_feature_toggles (feature_key, enabled, keywords, updated_at) VALUES
+        ('vote_kick', 0, 'vote kick,投票踢人', unixepoch()),
+        ('server_info', 0, 'server info,服务器信息', unixepoch()),
+        ('ping', 0, 'ping', unixepoch()),
+        ('restart_warning', 0, 'restart,重启警告', unixepoch()),
+        ('item_request', 0, 'item,物品请求', unixepoch())
+      ON CONFLICT(feature_key) DO NOTHING
+    `,
+  });
+
   for (const migration of migrations) {
     if (!appliedSet.has(migration.name)) {
       database.exec(migration.sql);

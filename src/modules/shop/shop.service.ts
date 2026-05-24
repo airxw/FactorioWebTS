@@ -10,7 +10,7 @@ import type {
 import { AppError } from '../../types/index.js';
 import { sendGameCommand } from '../../lib/game-command-bus.js';
 import { logger } from '../../lib/logger.js';
-import { createShopCdk, buildShopCommand } from '../cdk/cdk.service.js';
+import { createShopCdk, createBatchShopCdk, buildShopCommand } from '../cdk/cdk.service.js';
 import * as authRepo from '../auth/auth.repository.js';
 
 import * as vipRepo from '../vip/vip.repository.js';
@@ -106,10 +106,12 @@ function transformItem(item: DbShopItem): TransformedShopItem {
   };
 }
 
-export function getItems(category?: string): TransformedShopItem[] {
+export function getItems(category?: string, all?: boolean): TransformedShopItem[] {
   const db = getDb();
   const dbCategory = category ? (reverseCategoryMap[category] || category) : undefined;
-  const items = repo.findAllItems(db, dbCategory ? { category: dbCategory } : undefined);
+  const filters: { category?: string; activeOnly?: boolean } = { activeOnly: !all };
+  if (dbCategory) filters.category = dbCategory;
+  const items = repo.findAllItems(db, filters);
   return items.map(transformItem);
 }
 
@@ -142,7 +144,15 @@ export function updateItem(
   const db = getDb();
   const existing = repo.findItemById(db, id);
   if (!existing) throw new AppError('Item not found', 404);
-  repo.updateItem(db, id, data);
+  
+  const { enabled, ...restData } = data;
+  const repoData: Record<string, unknown> = restData;
+  
+  if (enabled !== undefined) {
+    repoData.is_active = enabled ? 1 : 0;
+  }
+  
+  repo.updateItem(db, id, repoData);
   return repo.findItemById(db, id)!;
 }
 
@@ -219,7 +229,7 @@ export function createBatchOrder(
   userId: number,
   userVipLevel: number,
   data: CreateOrderBatchInput
-): { orders: Array<{ order_id: number; code?: string }>; player_name: string; total_price: number; delivery_method: string } {
+): { orders: Array<{ order_id: number; code?: string }>; code?: string; player_name: string; total_price: number; delivery_method: string } {
   const db = getDb();
 
   const orders: Array<{ order_id: number; code?: string }> = [];
@@ -235,6 +245,8 @@ export function createBatchOrder(
     }
     playerName = user.game_id;
   }
+
+  const cdkItems: Array<{ item: DbShopItem; quantity: number; quality_level: number }> = [];
 
   for (const entry of data.items) {
     const item = repo.findItemById(db, entry.item_id);
@@ -258,26 +270,41 @@ export function createBatchOrder(
     const price = Math.round(item.price * entry.quantity * multiplier * 100) / 100;
     totalPrice += price;
 
-    let code: string | undefined;
     if (deliveryMethod === 'cdk') {
-      code = createShopCdk(userId, item, entry.quantity, entry.quality_level, playerName);
+      cdkItems.push({ item, quantity: entry.quantity, quality_level: entry.quality_level });
+    } else {
+      const orderId = repo.createOrder(db, {
+        user_id: userId,
+        item_id: entry.item_id,
+        player_name: playerName,
+        quantity: entry.quantity,
+        total_price: price,
+        quality_level: entry.quality_level,
+        delivery_method: deliveryMethod,
+        cdk_code: null,
+      });
+      orders.push({ order_id: orderId });
     }
-
-    const orderId = repo.createOrder(db, {
-      user_id: userId,
-      item_id: entry.item_id,
-      player_name: playerName,
-      quantity: entry.quantity,
-      total_price: price,
-      quality_level: entry.quality_level,
-      delivery_method: deliveryMethod,
-      cdk_code: code ?? null,
-    });
-
-    orders.push({ order_id: orderId, code });
   }
 
-  return { orders, player_name: playerName, total_price: Math.round(totalPrice * 100) / 100, delivery_method: deliveryMethod };
+  let batchCode: string | undefined;
+  if (deliveryMethod === 'cdk' && cdkItems.length > 0) {
+    batchCode = createBatchShopCdk(userId, cdkItems, playerName);
+    const totalQuantity = cdkItems.reduce((sum, e) => sum + e.quantity, 0);
+    const orderId = repo.createOrder(db, {
+      user_id: userId,
+      item_id: cdkItems[0].item.id,
+      player_name: playerName,
+      quantity: totalQuantity,
+      total_price: totalPrice,
+      quality_level: 0,
+      delivery_method: 'cdk',
+      cdk_code: batchCode,
+    });
+    orders.push({ order_id: orderId, code: batchCode });
+  }
+
+  return { orders, code: batchCode, player_name: playerName, total_price: Math.round(totalPrice * 100) / 100, delivery_method: deliveryMethod };
 }
 
 export function getMyOrders(
@@ -308,16 +335,20 @@ export function validateOrder(
   };
 }
 
-export function cancelOrder(userId: number, orderId: number): void {
+export function deleteOrder(userId: number, orderId: number): void {
   const db = getDb();
   const order = repo.findOrderById(db, orderId);
   if (!order) throw new AppError('Order not found', 404);
   if (order.user_id !== userId)
     throw new AppError('Not authorized', 403);
-  if (order.status !== 'pending')
-    throw new AppError('Only pending orders can be cancelled', 400);
 
-  repo.updateOrderStatus(db, orderId, 'cancelled');
+  db.prepare('DELETE FROM orders WHERE id = ?').run(orderId);
+}
+
+export function deleteBatchOrders(userId: number, orderIds: number[]): { deleted: number } {
+  const db = getDb();
+  const count = repo.deleteOrdersByIds(db, orderIds, userId);
+  return { deleted: count };
 }
 
 export async function deliverOrder(

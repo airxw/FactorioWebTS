@@ -34,6 +34,31 @@ export function createShopCdk(
   return code;
 }
 
+export function createBatchShopCdk(
+  userId: number,
+  items: Array<{ item: DbShopItem; quantity: number; quality_level: number }>,
+  playerName: string
+): string {
+  const db = getDb();
+  const code = repo.generateCode(db);
+  const commands = items.map(function(e) {
+    return buildShopCommand(e.item, e.quantity, e.quality_level, '{player}');
+  });
+  const command = commands.join('|||');
+
+  repo.createCode(db, {
+    code,
+    command,
+    item_id: null,
+    player_name: playerName,
+    type: 'shop',
+    user_id: userId,
+  });
+
+  logger.info({ code, itemCount: items.length, playerName }, '[CDK] Batch Shop CDK created');
+  return code;
+}
+
 export function createVipCdk(
   username: string,
   vipLevel: number,
@@ -71,12 +96,27 @@ export async function executeClaimCode(playerName: string, cdkCode: string): Pro
   repo.updateCodeStatus(db, cdkCode, 'USED');
 
   const finalCommand = cdk.command.replace(/\{player\}/g, playerName);
+  const commands = finalCommand.split('|||');
 
-  logger.info({ playerName, cdkCode, command: finalCommand }, '[CDK] Executing claim');
+  logger.info({ playerName, cdkCode, commandCount: commands.length, commands }, '[CDK] Executing claim');
 
-  const result = await sendGameCommand(finalCommand);
+  let allOk = true;
+  const succeededIndices: number[] = [];
 
-  if (result.ok) {
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i].trim();
+    if (!cmd) continue;
+    const result = await sendGameCommand(cmd);
+    if (result.ok) {
+      succeededIndices.push(i);
+    } else {
+      allOk = false;
+      logger.error({ playerName, cdkCode, cmd, err: result.error, index: i }, '[CDK] Command failed in batch');
+      break;
+    }
+  }
+
+  if (allOk) {
     if (cdk.type === 'vip') {
       await applyVipFromCode(playerName, cdk);
     }
@@ -85,7 +125,7 @@ export async function executeClaimCode(playerName: string, cdkCode: string): Pro
   } else {
     repo.updateCodeStatus(db, cdkCode, 'UNUSED');
     fireAndForget(`/w ${playerName} 发货失败，提货码已回滚，请稍后再试。`);
-    logger.error({ playerName, cdkCode, err: result.error }, '[CDK] Claim failed, status rolled back');
+    logger.error({ playerName, cdkCode }, '[CDK] Claim failed, status rolled back');
   }
 }
 

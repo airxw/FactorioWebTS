@@ -37,8 +37,8 @@ export default async function shopRoutes(app: FastifyInstance) {
 
   app.get('/api/shop/items', async (request, reply) => {
     try {
-      const { category } = request.query as { category?: string };
-      const items = service.getItems(category);
+      const { category, all } = request.query as { category?: string; all?: string };
+      const items = service.getItems(category, all === '1');
       return reply.send({ success: true, data: items });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message: string };
@@ -173,10 +173,9 @@ export default async function shopRoutes(app: FastifyInstance) {
         }
       }
 
-      const codes = result.orders.map(o => o.code).filter((c): c is string => !!c);
       return reply.status(201).send({
         success: true,
-        data: { codes, player_name: result.player_name, total_price: result.total_price, item_count: result.orders.length, delivery_method: result.delivery_method },
+        data: { code: result.code, player_name: result.player_name, total_price: result.total_price, item_count: result.orders.length, delivery_method: result.delivery_method },
       });
     } catch (e) {
       const err = e as { statusCode?: number; message: string };
@@ -197,9 +196,9 @@ export default async function shopRoutes(app: FastifyInstance) {
       const data = result.data.map((o) => ({
         order_id: o.id,
         order_number: o.order_number,
-        item_name: o.item_name,
-        item_code: o.item_code,
-        category: o.item_category,
+        item_name: o.item_name || '批量商品',
+        item_code: o.item_code || '',
+        category: o.item_category || '',
         player_name: o.player_name,
         quantity: o.quantity,
         total_price: o.total_price,
@@ -207,6 +206,7 @@ export default async function shopRoutes(app: FastifyInstance) {
         quality_level: o.quality_level,
         delivery_method: o.delivery_method,
         cdk_code: o.cdk_code,
+        is_batch: o.delivery_method === 'cdk' && o.quality_level === 0,
         created_at: o.created_at,
         delivered_at: o.delivered_at,
       }));
@@ -249,11 +249,25 @@ export default async function shopRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/shop/orders/:id/cancel', { preHandler: [authenticate] }, async (request, reply) => {
+  app.post('/api/shop/orders/:id/delete', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
-      service.cancelOrder(request.currentUser.user_id, parseInt(id, 10));
-      return reply.send({ success: true, message: '订单已取消' });
+      service.deleteOrder(request.currentUser.user_id, parseInt(id, 10));
+      return reply.send({ success: true, message: '订单已删除' });
+    } catch (e) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/shop/orders/delete-batch', { preHandler: [authenticate] }, async (request, reply) => {
+    const { ids } = (request.body as { ids?: number[] }) || {};
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return reply.status(400).send({ success: false, error: '请选择要删除的订单' });
+    }
+    try {
+      const result = service.deleteBatchOrders(request.currentUser.user_id, ids);
+      return reply.send({ success: true, message: `已删除 ${result.deleted} 个订单`, deleted: result.deleted });
     } catch (e) {
       const err = e as { statusCode?: number; message: string };
       return reply.status(err.statusCode || 500).send({ success: false, error: err.message });

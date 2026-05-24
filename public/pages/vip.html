@@ -125,6 +125,9 @@
                     <div class="form-group"><label class="form-label">单次限购数量</label><input type="number" class="form-control" x-model="levelForm.single_purchase_limit" min="-1"></div>
                     <div class="form-group"><label class="form-label">最高品质等级</label><input type="number" class="form-control" x-model="levelForm.max_quality_level" min="0"></div>
                     <div class="form-group"><label class="form-label">描述</label><textarea class="form-control" x-model="levelForm.description" rows="3"></textarea></div>
+                    <div class="form-group"><label class="form-label">玩家加入欢迎消息</label><textarea class="form-control" x-model="levelForm.join_message" rows="2" placeholder="留空则使用全局默认消息，支持 {player_name} {server_name} {online_count}"></textarea></div>
+                    <div class="form-group"><label class="form-label">玩家离开告别消息</label><textarea class="form-control" x-model="levelForm.leave_message" rows="2" placeholder="留空则使用全局默认消息，支持 {player_name} {server_name} {online_count}"></textarea></div>
+                    <div class="form-group"><label class="form-label">首次加入欢迎消息</label><textarea class="form-control" x-model="levelForm.first_join_message" rows="2" placeholder="留空则使用全局默认消息，支持 {player_name} {server_name} {online_count}"></textarea></div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary" :disabled="saveLevelLoading">保存</button>
                         <button type="button" class="btn btn-secondary" @click="showLevelModal = false">取消</button>
@@ -149,7 +152,7 @@
         vipUsers: [],
         showLevelModal: false,
         editingLevel: null,
-        levelForm: { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [] },
+        levelForm: { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [], join_message: '', leave_message: '', first_join_message: '' },
         vipForm: { username: '', vip_level: '', duration_days: 30 },
         usernameSearchTimeout: null,
         usernameResults: [],
@@ -188,7 +191,7 @@
 
         openCreateLevel() {
           this.editingLevel = null;
-          this.levelForm = { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [] };
+          this.levelForm = { level: 1, name: '', price: 0, daily_purchase_limit: -1, single_purchase_limit: -1, max_quality_level: 0, description: '', features: [], join_message: '', leave_message: '', first_join_message: '' };
           this.showLevelModal = true;
         },
 
@@ -201,7 +204,10 @@
             single_purchase_limit: l.single_purchase_limit ?? -1,
             max_quality_level: l.max_quality_level ?? 0,
             description: l.description || '',
-            features: (l.features && l.features.length > 0) ? l.features.slice() : []
+            features: (l.features && l.features.length > 0) ? l.features.slice() : [],
+            join_message: l.join_message || '',
+            leave_message: l.leave_message || '',
+            first_join_message: l.first_join_message || ''
           };
           this.showLevelModal = true;
         },
@@ -221,6 +227,9 @@
             daily_purchase_limit: this.levelForm.daily_purchase_limit,
             single_purchase_limit: this.levelForm.single_purchase_limit,
             max_quality_level: this.levelForm.max_quality_level,
+            join_message: this.levelForm.join_message || null,
+            leave_message: this.levelForm.leave_message || null,
+            first_join_message: this.levelForm.first_join_message || null,
             features: this.levelForm.features && this.levelForm.features.length > 0 ? this.levelForm.features : (this.levelForm.description ? [this.levelForm.description] : [])
           };
 

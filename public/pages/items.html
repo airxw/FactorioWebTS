@@ -201,7 +201,7 @@
             console.error('Failed to load categories:', e);
           }
           try {
-            var res = await fetchAPI('/api/shop/items');
+            var res = await fetchAPI('/api/shop/items?all=1');
             if (!res.ok) throw new Error('Items API error: ' + res.status);
             var data = await res.json();
             if (!data.success) throw new Error('Items API failed: ' + data.error);

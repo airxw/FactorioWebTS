@@ -32,41 +32,60 @@
                 <div class="page-header">
                     <div class="page-header-left">
                         <h2><i class="bi bi-reply-all"></i>服务器自动回复</h2>
-                        <p>管理服务器的自动回复规则，当检测到特定关键词时自动发送预设内容</p>
+                        <p>管理服务器的自动回复功能，固定功能使用开关控制，自定义回复可添加多条规则</p>
                     </div>
-                    <button class="btn btn-primary" onclick="openAddModal()">
-                        <i class="bi bi-plus-lg me-1"></i>添加规则
-                    </button>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="bi bi-toggle2-on"></i>固定功能开关
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="feature-toggles-list">
+                            <div class="empty-state">
+                                <i class="bi bi-arrow-clockwise spin"></i>
+                                <p>加载中...</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h3 class="card-title">
-                            <i class="bi bi-list-ul"></i>回复规则列表
+                            <i class="bi bi-list-ul"></i>自定义回复规则
                         </h3>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-danger btn-sm" id="batch-delete-btn" style="display:none;" onclick="openBatchDeleteModal()">
+                                <i class="bi bi-trash me-1"></i>批量删除
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="openAddModal()">
+                                <i class="bi bi-plus-lg me-1"></i>添加规则
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
                             <table class="data-table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 40px;"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)"></th>
                                         <th style="width: 50px;">#</th>
-                                        <th>类型</th>
                                         <th>关键词</th>
                                         <th>回复内容</th>
-                                        <th style="width: 120px;">状态</th>
+                                        <th>大小写</th>
+                                        <th style="width: 100px;">状态</th>
                                         <th style="width: 100px;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="response-list-body">
                                     <tr>
-                                        <td colspan="6">
+                                        <td colspan="7">
                                             <div class="empty-state">
                                                 <i class="bi bi-inbox"></i>
-                                                <p>暂无自动回复规则</p>
-                                                <button class="btn btn-outline-primary btn-sm" onclick="openAddModal()">
-                                                    <i class="bi bi-plus-lg me-1"></i>添加第一条回复规则
-                                                </button>
+                                                <p>暂无自定义回复规则</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -83,7 +102,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3 class="modal-title" id="responseModalTitle">
-                    <i class="bi bi-plus-circle"></i>添加自动回复规则
+                    <i class="bi bi-plus-circle"></i>添加自定义回复规则
                 </h3>
                 <button type="button" class="modal-close" onclick="closeResponseModal()">&times;</button>
             </div>
@@ -91,16 +110,15 @@
                 <input type="hidden" id="edit-response-id" value="">
 
                 <div class="mb-3">
-                    <label class="form-label">回复类型<span class="text-danger">*</span></label>
-                    <select class="form-control" id="resp-type">
-                        <option value="vote_kick">投票踢出 (vote_kick)</option>
-                        <option value="server_info">服务器信息 (server_info)</option>
-                        <option value="ping">Ping 回复 (ping)</option>
-                        <option value="restart_warning">重启警告 (restart_warning)</option>
-                        <option value="item_request">物品请求 (item_request)</option>
-                        <option value="custom">自定义 (custom)</option>
-                    </select>
-                    <div class="form-text">选择自动回复的触发类型，用于分类和功能匹配</div>
+                    <label class="form-label">关键词<span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="resp-keywords" placeholder="请输入关键词，多个关键词用逗号分隔">
+                    <div class="form-text">当玩家聊天中包含这些关键词时会自动触发回复</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">回复内容<span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="resp-content" rows="4" placeholder="请输入服务器自动发送的回复内容..."></textarea>
+                    <div class="form-text">支持使用 {player_name} 和 {trigger_text} 变量</div>
                 </div>
 
                 <div class="mb-3">
@@ -111,22 +129,39 @@
                     </label>
                     <div class="form-text">勾选后关键词匹配时区分大小写</div>
                 </div>
-
-                <div class="mb-3">
-                    <label class="form-label">关键词<span class="text-danger">*</span></label>
-                    <input type="text" class="form-control" id="resp-keywords" placeholder="请输入关键词，多个关键词用逗号分隔，如 tps,lag,卡">
-                    <div class="form-text">当玩家聊天中包含这些关键词时会自动触发该规则</div>
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label">回复内容 / 命令<span class="text-danger">*</span></label>
-                    <textarea class="form-control" id="resp-content" rows="4" placeholder="请输入服务器自动发送的回复内容..."></textarea>
-                    <div class="form-text">支持使用服务器命令，需要根据服务器版本进行调整，支持颜色代码等</div>
-                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeResponseModal()">取消</button>
                 <button type="button" class="btn btn-primary" onclick="saveResponse()">
+                    <i class="bi bi-check-lg me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="featureEditModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="bi bi-gear"></i>编辑功能关键词
+                </h3>
+                <button type="button" class="modal-close" onclick="closeFeatureEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-feature-key" value="">
+                <div class="mb-3">
+                    <label class="form-label">功能名称</label>
+                    <input type="text" class="form-control" id="feature-name" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">触发关键词<span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="feature-keywords" placeholder="请输入关键词，多个关键词用逗号分隔">
+                    <div class="form-text">当玩家聊天中包含这些关键词时会自动触发该功能</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeFeatureEditModal()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveFeatureKeywords()">
                     <i class="bi bi-check-lg me-1"></i>保存
                 </button>
             </div>
@@ -145,6 +180,23 @@
     <script src="/js/tooltip.js"></script>
     <script>
         var responseList = [];
+        var featureToggles = [];
+
+        var FEATURE_NAMES = {
+            vote_kick: '投票踢出',
+            server_info: '服务器信息',
+            ping: 'Ping回复',
+            restart_warning: '重启警告',
+            item_request: '物品请求'
+        };
+
+        var FEATURE_DESCRIPTIONS = {
+            vote_kick: '玩家发送关键词后自动发起投票踢人',
+            server_info: '玩家发送关键词后自动回复服务器信息',
+            ping: '玩家发送关键词后回复Ping值',
+            restart_warning: '玩家发送关键词后发送重启警告',
+            item_request: '玩家发送关键词后自动给予物品'
+        };
 
         document.addEventListener('DOMContentLoaded', function() {
             checkSession({
@@ -158,6 +210,7 @@
                         return;
                     }
                     SidebarMenu.initSidebarWithPermission();
+                    loadFeatureToggles();
                     loadResponses();
                 }
             });
@@ -165,7 +218,127 @@
             document.getElementById('responseModal').addEventListener('click', function(e) {
                 if (e.target === this) closeResponseModal();
             });
+
+            document.getElementById('featureEditModal').addEventListener('click', function(e) {
+                if (e.target === this) closeFeatureEditModal();
+            });
         });
+
+        async function loadFeatureToggles() {
+            try {
+                var response = await fetchAPI('/api/chat/feature-toggles');
+                var result = await response.json();
+                if (result.success && result.data) {
+                    featureToggles = result.data;
+                    renderFeatureToggles();
+                } else {
+                    showToast('加载功能开关失败', 'error');
+                }
+            } catch (e) {
+                console.error('加载功能开关失败', e);
+                showToast('加载功能开关失败: ' + e.message, 'error');
+            }
+        }
+
+        function renderFeatureToggles() {
+            var container = document.getElementById('feature-toggles-list');
+            container.innerHTML = '';
+
+            featureToggles.forEach(function(feature) {
+                var featureKey = feature.feature_key;
+                var name = FEATURE_NAMES[featureKey] || featureKey;
+                var description = FEATURE_DESCRIPTIONS[featureKey] || '';
+                var enabled = feature.enabled ? 'checked' : '';
+                var statusText = feature.enabled ? '已启用' : '已禁用';
+
+                var div = document.createElement('div');
+                div.className = 'feature-toggle-item';
+                div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border-color);gap:16px;';
+                div.innerHTML =
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="font-weight:600;margin-bottom:4px;">' + name + '</div>' +
+                        '<div style="font-size:0.85rem;color:var(--gray-color);margin-bottom:6px;">' + description + '</div>' +
+                        '<div style="font-size:0.82rem;">' +
+                            '<span style="color:var(--gray-color);">关键词: </span>' +
+                            '<span class="keyword-tags">' + (feature.keywords || '未设置') + '</span>' +
+                            '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="openFeatureEditModal(\'' + featureKey + '\')" style="padding:2px 8px;font-size:0.75rem;">' +
+                                '<i class="bi bi-pencil"></i> 编辑' +
+                            '</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="flex-shrink:0;">' +
+                        '<label class="toggle-switch">' +
+                            '<input type="checkbox" ' + enabled + ' onchange="toggleFeature(\'' + featureKey + '\', this.checked)">' +
+                            '<span class="toggle-slider"></span>' +
+                            '<span class="toggle-label">' + statusText + '</span>' +
+                        '</label>' +
+                    '</div>';
+                container.appendChild(div);
+            });
+        }
+
+        async function toggleFeature(featureKey, enabled) {
+            try {
+                var response = await fetchAPI('/api/chat/feature-toggles/' + featureKey, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabled ? 1 : 0 })
+                });
+                var result = await response.json();
+                if (result.success) {
+                    showToast(enabled ? '已启用' : '已禁用', 'success');
+                    loadFeatureToggles();
+                } else {
+                    showToast('操作失败: ' + (result.error || '未知错误'), 'error');
+                    loadFeatureToggles();
+                }
+            } catch (e) {
+                showToast('操作失败: ' + e.message, 'error');
+                loadFeatureToggles();
+            }
+        }
+
+        function openFeatureEditModal(featureKey) {
+            var feature = featureToggles.find(function(f) { return f.feature_key === featureKey; });
+            if (!feature) return;
+
+            document.getElementById('edit-feature-key').value = featureKey;
+            document.getElementById('feature-name').value = FEATURE_NAMES[featureKey] || featureKey;
+            document.getElementById('feature-keywords').value = feature.keywords || '';
+            document.getElementById('featureEditModal').style.display = 'block';
+        }
+
+        function closeFeatureEditModal() {
+            document.getElementById('featureEditModal').style.display = 'none';
+        }
+
+        async function saveFeatureKeywords() {
+            var featureKey = document.getElementById('edit-feature-key').value;
+            var keywords = document.getElementById('feature-keywords').value.trim();
+
+            if (!keywords) {
+                showToast('请输入关键词', 'error');
+                return;
+            }
+
+            try {
+                var response = await fetchAPI('/api/chat/feature-toggles/' + featureKey, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keywords: keywords })
+                });
+                var result = await response.json();
+                if (result.success) {
+                    closeFeatureEditModal();
+                    showToast('关键词更新成功', 'success');
+                    loadFeatureToggles();
+                } else {
+                    showToast('保存失败: ' + (result.error || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
 
         function openResponseModal() {
             document.getElementById('responseModal').style.display = 'block';
@@ -183,11 +356,11 @@
                     responseList = result.data || [];
                     renderResponseList();
                 } else {
-                    showToast('加载自动回复规则失败', 'error');
+                    showToast('加载自定义回复规则失败', 'error');
                 }
             } catch (e) {
-                console.error('加载自动回复规则失败', e);
-                showToast('加载自动回复规则失败: ' + e.message, 'error');
+                console.error('加载自定义回复规则失败', e);
+                showToast('加载自定义回复规则失败: ' + e.message, 'error');
             }
         }
 
@@ -199,17 +372,12 @@
                 tbody.innerHTML = '<tr><td colspan="6">' +
                     '<div class="empty-state">' +
                     '<i class="bi bi-inbox"></i>' +
-                    '<p>暂无自动回复规则</p>' +
-                    '<button class="btn btn-outline-primary btn-sm" onclick="openAddModal()">' +
-                    '<i class="bi bi-plus-lg me-1"></i>添加第一条回复规则</button>' +
+                    '<p>暂无自定义回复规则</p>' +
                     '</div></td></tr>';
                 return;
             }
 
             responseList.forEach(function(resp, index) {
-                var typeLabel = resp.type || 'custom';
-                var typeClass = resp.type || 'custom';
-                var caseLabel = resp.case_sensitive ? '区分大小写' : '不区分大小写';
                 var keywords = (resp.trigger_text || '').split(',').map(function(k) {
                     return k.trim();
                 }).filter(Boolean).map(function(k) {
@@ -217,13 +385,15 @@
                 }).join(' ');
                 var statusChecked = resp.enabled ? 'checked' : '';
                 var statusText = resp.enabled ? '已启用' : '已禁用';
+                var caseText = resp.case_sensitive ? '区分' : '不区分';
 
                 var tr = document.createElement('tr');
                 tr.innerHTML =
+                    '<td><input type="checkbox" class="response-checkbox" value="' + resp.id + '" onchange="updateBatchDeleteButton()"></td>' +
                     '<td style="color: var(--gray-color); font-size: 0.82rem;">' + (index + 1) + '</td>' +
-                    '<td><span class="badge-response-type ' + typeClass + '">' + typeLabel + '</span></td>' +
                     '<td>' + keywords + '</td>' +
                     '<td><span class="content-preview" title="' + escapeHtml(resp.response_text || '') + '">' + escapeHtml(resp.response_text || '') + '</span></td>' +
+                    '<td>' + caseText + '</td>' +
                     '<td>' +
                         '<label class="toggle-switch">' +
                             '<input type="checkbox" ' + statusChecked +
@@ -248,11 +418,10 @@
 
         function openAddModal() {
             document.getElementById('edit-response-id').value = '';
-            document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-plus-circle"></i>添加自动回复规则';
-            document.getElementById('resp-type').value = 'custom';
-            document.getElementById('resp-case-sensitive').checked = false;
+            document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-plus-circle"></i>添加自定义回复规则';
             document.getElementById('resp-keywords').value = '';
             document.getElementById('resp-content').value = '';
+            document.getElementById('resp-case-sensitive').checked = false;
             openResponseModal();
         }
 
@@ -261,20 +430,18 @@
             if (!resp) return;
 
             document.getElementById('edit-response-id').value = resp.id;
-            document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-pencil"></i>编辑自动回复规则';
-            document.getElementById('resp-type').value = resp.type || 'custom';
-            document.getElementById('resp-case-sensitive').checked = !!resp.case_sensitive;
+            document.getElementById('responseModalTitle').innerHTML = '<i class="bi bi-pencil"></i>编辑自定义回复规则';
             document.getElementById('resp-keywords').value = resp.trigger_text || '';
             document.getElementById('resp-content').value = resp.response_text || '';
+            document.getElementById('resp-case-sensitive').checked = !!resp.case_sensitive;
 
             openResponseModal();
         }
 
         async function saveResponse() {
-            var type = document.getElementById('resp-type').value;
-            var caseSensitive = document.getElementById('resp-case-sensitive').checked ? 1 : 0;
             var keywords = document.getElementById('resp-keywords').value.trim();
             var content = document.getElementById('resp-content').value.trim();
+            var caseSensitive = document.getElementById('resp-case-sensitive').checked ? 1 : 0;
             var editId = document.getElementById('edit-response-id').value;
 
             if (!keywords) {
@@ -286,13 +453,12 @@
                 return;
             }
 
-            var original = editId ? responseList.find(function(r) { return r.id == editId; }) : null;
             var body = JSON.stringify({
-                type: type,
+                type: 'custom',
                 trigger_text: keywords,
                 response_text: content,
                 case_sensitive: caseSensitive,
-                enabled: original ? original.enabled : 1
+                enabled: 1
             });
 
             try {
@@ -368,6 +534,63 @@
                 }
             } catch (e) {
                 showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        function toggleSelectAll(checked) {
+            var checkboxes = document.querySelectorAll('.response-checkbox');
+            checkboxes.forEach(function(cb) {
+                cb.checked = checked;
+            });
+            updateBatchDeleteButton();
+        }
+
+        function updateBatchDeleteButton() {
+            var checked = document.querySelectorAll('.response-checkbox:checked');
+            var btn = document.getElementById('batch-delete-btn');
+            if (checked.length > 0) {
+                btn.style.display = 'inline-flex';
+                btn.innerHTML = '<i class="bi bi-trash me-1"></i>批量删除(' + checked.length + ')';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        function openBatchDeleteModal() {
+            var checkboxes = document.querySelectorAll('.response-checkbox:checked');
+            var ids = [];
+            checkboxes.forEach(function(cb) {
+                ids.push(parseInt(cb.value));
+            });
+            if (ids.length === 0) return;
+
+            showModal({
+                title: '确认批量删除',
+                content: '确定要删除选中的 ' + ids.length + ' 条回复规则吗？此操作不可恢复。',
+                confirmText: '删除',
+                danger: true,
+                onConfirm: function() {
+                    confirmBatchDelete(ids);
+                }
+            });
+        }
+
+        async function confirmBatchDelete(ids) {
+            try {
+                var response = await fetchAPI('/api/chat/trigger-responses/batch-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: ids })
+                });
+                var result = await response.json();
+                if (result.success) {
+                    showToast('已删除 ' + result.deleted + ' 条规则', 'success');
+                    loadResponses();
+                } else {
+                    showToast('批量删除失败: ' + (result.error || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showToast('批量删除失败: ' + e.message, 'error');
             }
         }
     </script>

@@ -18,6 +18,10 @@
   --danger-hover: #a93226;
   --warning-color: #e67e22;
   --warning-hover: #d35400;
+  --success-color: #28a745;
+  --color-success-bg: #d4edda;
+  --color-success-border: #28a745;
+  --color-primary-bg: rgba(230, 126, 34, 0.08);
 
   /* 表面/背景颜色 */
   --color-bg: #faf8f6;
@@ -95,6 +99,10 @@
   --color-border: #3e2a20;
   --dark-color: #e0d8d0;
   --border-color: #3e2a20;
+  --success-color: #4caf50;
+  --color-success-bg: rgba(76, 175, 80, 0.12);
+  --color-success-border: #4caf50;
+  --color-primary-bg: rgba(230, 126, 34, 0.12);
 }
 
 [data-theme="dark"] body {

@@ -1,7 +1,9 @@
 import { getDb } from '../../lib/database.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './chat.repository.js';
-import type { TriggerResponseInput, ServerResponseInput, PeriodicMessageInput, PlayerEventInput } from './chat.schema.js';
+import * as vipRepo from '../vip/vip.repository.js';
+import * as authRepo from '../auth/auth.repository.js';
+import type { TriggerResponseInput, ServerResponseInput, PeriodicMessageInput, PlayerEventInput, FeatureToggleInput } from './chat.schema.js';
 import { AppError } from '../../types/index.js';
 import { sendGameCommand, fireAndForget } from '../../lib/game-command-bus.js';
 import { getOnlinePlayers } from '../player/player.service.js';
@@ -11,12 +13,61 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveConfigDir } from '../../lib/paths.js';
 import { SERVER_NAME_CACHE_TTL } from '../../config/constants.js';
+import * as voteService from '../vote/vote.service.js';
 
 interface GiftItem {
   name: string;
   code: string;
   count: number;
   quality: string;
+}
+
+interface VipMessages {
+  join_message: string;
+  leave_message: string;
+  first_join_message: string;
+}
+
+function parseVipMessages(featuresJson: string): VipMessages {
+  const result: VipMessages = { join_message: '', leave_message: '', first_join_message: '' };
+  try {
+    const parsed = JSON.parse(featuresJson);
+    if (Array.isArray(parsed)) {
+      const msgObj = parsed.find((f: unknown): f is Record<string, unknown> => {
+        if (typeof f !== 'object' || f === null) return false;
+        const obj = f as Record<string, unknown>;
+        return !!(obj.join_message || obj.leave_message || obj.first_join_message);
+      });
+      if (msgObj) {
+        result.join_message = (msgObj.join_message as string) || '';
+        result.leave_message = (msgObj.leave_message as string) || '';
+        result.first_join_message = (msgObj.first_join_message as string) || '';
+      }
+    }
+  } catch { /* ignore parse error */ }
+  return result;
+}
+
+function getPlayerVipMessages(playerName: string): { vipMessages: VipMessages; globalSettings: Record<string, string> } {
+  const db = getDb();
+  const user = authRepo.findUserByUsername(db, playerName);
+  const globalSettings = repo.getChatSettings(db);
+  
+  if (!user || user.vip_level <= 0) {
+    return { vipMessages: { join_message: '', leave_message: '', first_join_message: '' }, globalSettings };
+  }
+  
+  const now = Math.floor(Date.now() / 1000);
+  if (user.vip_expiry && user.vip_expiry < now) {
+    return { vipMessages: { join_message: '', leave_message: '', first_join_message: '' }, globalSettings };
+  }
+  
+  const vipLevel = vipRepo.findLevelByLevel(db, user.vip_level);
+  if (!vipLevel) {
+    return { vipMessages: { join_message: '', leave_message: '', first_join_message: '' }, globalSettings };
+  }
+  
+  return { vipMessages: parseVipMessages(vipLevel.features_json), globalSettings };
 }
 
 let cachedServerName: string | null = null;
@@ -111,7 +162,7 @@ async function processPlayerJoin(playerName: string): Promise<void> {
   }, JOIN_DEBOUNCE_MS));
 
   const db = getDb();
-  const settings = repo.getChatSettings(db);
+  const { vipMessages, globalSettings } = getPlayerVipMessages(playerName);
   const isFirstJoin = !repo.hasPlayerLoginEvent(db, playerName);
 
   recordEvent(playerName, 'login', {});
@@ -119,33 +170,35 @@ async function processPlayerJoin(playerName: string): Promise<void> {
   const onlineCount = await getOnlinePlayersWithTimeout(ONLINE_PLAYERS_TIMEOUT_MS);
 
   if (isFirstJoin) {
-    if (isEnabled(settings.first_join_enabled) && settings.first_join_message) {
-      const msg = replaceMessageVariables(settings.first_join_message, playerName, onlineCount);
+    const firstJoinMsg = vipMessages.first_join_message || globalSettings.first_join_message;
+    if (isEnabled(globalSettings.first_join_enabled) && firstJoinMsg) {
+      const msg = replaceMessageVariables(firstJoinMsg, playerName, onlineCount);
       fireAndForget(`/shout ${msg}`);
     }
-    if (isEnabled(settings.first_gift_enabled) && settings.first_gift_items) {
+    if (isEnabled(globalSettings.first_gift_enabled) && globalSettings.first_gift_items) {
       try {
-        const items: GiftItem[] = JSON.parse(settings.first_gift_items);
+        const items: GiftItem[] = JSON.parse(globalSettings.first_gift_items);
         if (items.length > 0 && !repo.hasGiftClaim(db, playerName, 'first')) {
           await sendGiftItems(playerName, items);
-          repo.addGiftClaim(db, playerName, 'first', settings.first_gift_items);
+          repo.addGiftClaim(db, playerName, 'first', globalSettings.first_gift_items);
         }
       } catch (e) { logger.warn({ err: e }, '[Chat] Send first-gift failed'); }
     }
   }
 
-  if (isEnabled(settings.join_enabled) && settings.join_message) {
-    const msg = replaceMessageVariables(settings.join_message, playerName, onlineCount);
+  const joinMsg = vipMessages.join_message || globalSettings.join_message;
+  if (isEnabled(globalSettings.join_enabled) && joinMsg) {
+    const msg = replaceMessageVariables(joinMsg, playerName, onlineCount);
     fireAndForget(`/shout ${msg}`);
   }
 
-  if (!isFirstJoin && isEnabled(settings.relogin_gift_enabled) && settings.relogin_gift_items) {
+  if (!isFirstJoin && isEnabled(globalSettings.relogin_gift_enabled) && globalSettings.relogin_gift_items) {
     try {
-      const items: GiftItem[] = JSON.parse(settings.relogin_gift_items);
+      const items: GiftItem[] = JSON.parse(globalSettings.relogin_gift_items);
       if (items.length > 0) {
-        const cooldownHours = parseInt(settings.relogin_cooldown || '24', 10);
-        const dailyLimit = parseInt(settings.relogin_daily_limit || '1', 10);
-        const totalLimit = parseInt(settings.relogin_total_limit || '0', 10);
+        const cooldownHours = parseInt(globalSettings.relogin_cooldown || '24', 10);
+        const dailyLimit = parseInt(globalSettings.relogin_daily_limit || '1', 10);
+        const totalLimit = parseInt(globalSettings.relogin_total_limit || '0', 10);
 
         const lastLogoutTime = repo.getLastLogoutTime(db, playerName);
         const now = Math.floor(Date.now() / 1000);
@@ -162,7 +215,7 @@ async function processPlayerJoin(playerName: string): Promise<void> {
           if (dailyLimit === 0 || todayCount < dailyLimit) {
             if (totalLimit === 0 || repo.countGiftClaimsTotal(db, playerName, 'relogin') < totalLimit) {
               await sendGiftItems(playerName, items);
-              repo.addGiftClaim(db, playerName, 'relogin', settings.relogin_gift_items);
+              repo.addGiftClaim(db, playerName, 'relogin', globalSettings.relogin_gift_items);
             }
           }
         }
@@ -184,14 +237,15 @@ async function processPlayerLeave(playerName: string): Promise<void> {
   }, JOIN_DEBOUNCE_MS));
 
   const db = getDb();
-  const settings = repo.getChatSettings(db);
+  const { vipMessages, globalSettings } = getPlayerVipMessages(playerName);
 
   recordEvent(playerName, 'logout', {});
 
-  if (isEnabled(settings.leave_enabled) && settings.leave_message) {
+  const leaveMsg = vipMessages.leave_message || globalSettings.leave_message;
+  if (isEnabled(globalSettings.leave_enabled) && leaveMsg) {
     const playersOnline = await getOnlinePlayersWithTimeout(ONLINE_PLAYERS_TIMEOUT_MS);
     const onlineCount = Math.max(0, playersOnline - 1);
-    const msg = replaceMessageVariables(settings.leave_message, playerName, onlineCount);
+    const msg = replaceMessageVariables(leaveMsg, playerName, onlineCount);
     fireAndForget(`/shout ${msg}`);
   }
 }
@@ -216,6 +270,7 @@ export function listTriggerResponses() {
 
 export function addTriggerResponse(data: TriggerResponseInput) {
   return repo.addTriggerResponse(getDb(), {
+    type: data.type ?? 'custom',
     trigger_text: data.trigger_text,
     response_text: data.response_text ?? '',
     case_sensitive: data.case_sensitive ?? 0,
@@ -228,9 +283,30 @@ export function deleteTriggerResponse(id: number): void {
   if (!ok) throw new AppError('Trigger not found', 404);
 }
 
+export function deleteTriggerResponsesBatch(ids: number[]): number {
+  if (ids.length === 0) return 0;
+  return repo.deleteTriggerResponsesByIds(getDb(), ids);
+}
+
 export function updateTriggerResponse(id: number, data: { trigger_text?: string; response_text?: string; case_sensitive?: number; enabled?: number }): boolean {
   const db = getDb();
   return repo.updateTriggerResponse(db, id, data);
+}
+
+export function getFeatureToggles() {
+  return repo.getFeatureToggles(getDb());
+}
+
+export function updateFeatureToggle(featureKey: string, data: FeatureToggleInput): void {
+  const db = getDb();
+  const toggle = repo.getFeatureToggle(db, featureKey);
+  if (!toggle) throw new AppError(`Feature '${featureKey}' not found`, 404);
+  
+  const ok = repo.updateFeatureToggle(db, featureKey, {
+    enabled: data.enabled,
+    keywords: data.keywords,
+  });
+  if (!ok) throw new AppError('Failed to update feature toggle', 500);
 }
 
 export function listServerResponses() {
@@ -312,8 +388,42 @@ export function initChatEventSubscriptions(): void {
 
     try {
       const db = getDb();
-      const triggers = repo.listTriggerResponses(db);
 
+      const featureToggles = repo.getFeatureToggles(db);
+      for (const feature of featureToggles) {
+        if (!feature.enabled || !feature.keywords) continue;
+
+        const keywords = feature.keywords.split(',').map(k => k.trim()).filter(Boolean);
+        for (const keyword of keywords) {
+          let isMatch = false;
+          if (data.message.toLowerCase().includes(keyword.toLowerCase())) {
+            isMatch = true;
+          }
+
+          if (isMatch) {
+            switch (feature.feature_key) {
+              case 'vote_kick':
+                handleVoteKick(data.player, data.message, keyword);
+                break;
+              case 'server_info':
+                handleServerInfo(data.player);
+                break;
+              case 'ping':
+                handlePing(data.player);
+                break;
+              case 'restart_warning':
+                handleRestartWarning();
+                break;
+              case 'item_request':
+                handleItemRequest(data.player, data.message, keyword, '');
+                break;
+            }
+            return;
+          }
+        }
+      }
+
+      const triggers = repo.listTriggerResponses(db);
       for (const trigger of triggers) {
         if (!trigger.enabled) continue;
 
@@ -341,6 +451,91 @@ export function initChatEventSubscriptions(): void {
   eventBus.on('config:server-settings-changed', () => {
     clearServerNameCache();
   });
+}
+
+function extractLastWord(message: string, triggerText: string): string | null {
+  const normalizedMessage = message.toLowerCase();
+  const normalizedTrigger = triggerText.toLowerCase();
+  const parts = message.split(/\s+/);
+  
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const candidate = parts[i].trim();
+    if (candidate.length > 0 && !normalizedTrigger.includes(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function handleVoteKick(playerName: string, message: string, triggerText: string): void {
+  try {
+    const targetPlayer = extractLastWord(message, triggerText);
+    if (!targetPlayer) {
+      fireAndForget(`/shout @${playerName} 使用格式: ${triggerText} <玩家名称>`);
+      return;
+    }
+    
+    const db = getDb();
+    const user = authRepo.findUserByUsername(db, playerName);
+    const userId = user ? user.id : 0;
+    
+    voteService.startVote({ target: targetPlayer, type: 'kick', reason: '' }, userId);
+    logger.info({ player: playerName, target: targetPlayer }, '[Chat Trigger] 已发起投票踢人');
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    const errorMsg = err.message || '发起投票失败';
+    fireAndForget(`/shout @${playerName} ${errorMsg}`);
+    logger.error({ err, player: playerName }, '[Chat Trigger] 发起投票踢人失败');
+  }
+}
+
+function handleServerInfo(playerName: string): void {
+  try {
+    const serverName = getServerName();
+    fireAndForget(`/shout 服务器: ${serverName} | 时间: ${new Date().toLocaleString('zh-CN')}`);
+    logger.info({ player: playerName }, '[Chat Trigger] 已发送服务器信息');
+  } catch (e: unknown) {
+    logger.error({ err: e, player: playerName }, '[Chat Trigger] 发送服务器信息失败');
+  }
+}
+
+function handlePing(playerName: string): void {
+  try {
+    const startTime = Date.now();
+    fireAndForget(`/shout @${playerName} Ping: ${Date.now() - startTime}ms`);
+    logger.info({ player: playerName }, '[Chat Trigger] 已发送Ping响应');
+  } catch (e: unknown) {
+    logger.error({ err: e, player: playerName }, '[Chat Trigger] 发送Ping响应失败');
+  }
+}
+
+function handleRestartWarning(): void {
+  try {
+    fireAndForget(`/shout [警告] 服务器将在30分钟后重启，请提前做好保存工作！`);
+    logger.info('[Chat Trigger] 已发送重启警告');
+  } catch (e: unknown) {
+    logger.error({ err: e }, '[Chat Trigger] 发送重启警告失败');
+  }
+}
+
+function handleItemRequest(playerName: string, message: string, triggerText: string, responseText: string): void {
+  try {
+    const itemCode = extractLastWord(message, triggerText);
+    if (!itemCode) {
+      fireAndForget(`/shout @${playerName} 使用格式: ${triggerText} <物品代码>`);
+      return;
+    }
+    
+    const command = responseText
+      .replace(/\{player_name\}/g, playerName)
+      .replace(/\{item_code\}/g, itemCode)
+      .replace(/\{trigger_text\}/g, triggerText);
+    
+    fireAndForget(command);
+    logger.info({ player: playerName, item: itemCode }, '[Chat Trigger] 已处理物品请求');
+  } catch (e: unknown) {
+    logger.error({ err: e, player: playerName }, '[Chat Trigger] 处理物品请求失败');
+  }
 }
 
 export function listFirstJoinPlayers() {

@@ -20,6 +20,7 @@ export const updateItemSchema = z.object({
   stock: z.number().int().min(-1).optional(),
   quality_max: z.number().int().min(1).max(5).optional(),
   is_active: z.number().int().min(0).max(1).optional(),
+  enabled: z.boolean().optional(),
   image_url: z.string().optional(),
 });
 

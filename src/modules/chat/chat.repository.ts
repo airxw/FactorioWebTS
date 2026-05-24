@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 
 export interface DbTriggerResponse {
   id: number;
+  type: string;
   trigger_text: string;
   response_text: string;
   case_sensitive: number;
@@ -68,17 +69,24 @@ export function listTriggerResponses(db: Database.Database): DbTriggerResponse[]
   return db.prepare('SELECT * FROM trigger_responses ORDER BY created_at DESC').all() as DbTriggerResponse[];
 }
 
-export function addTriggerResponse(db: Database.Database, data: { trigger_text: string; response_text: string; case_sensitive: number; enabled: number }): number {
+export function addTriggerResponse(db: Database.Database, data: { type: string; trigger_text: string; response_text: string; case_sensitive: number; enabled: number }): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.prepare(`
-    INSERT INTO trigger_responses (trigger_text, response_text, case_sensitive, enabled, created_at, updated_at)
-    VALUES (@trigger_text, @response_text, @case_sensitive, @enabled, @created_at, @updated_at)
+    INSERT INTO trigger_responses (type, trigger_text, response_text, case_sensitive, enabled, created_at, updated_at)
+    VALUES (@type, @trigger_text, @response_text, @case_sensitive, @enabled, @created_at, @updated_at)
   `).run({ ...data, created_at: now, updated_at: now });
   return Number(result.lastInsertRowid);
 }
 
 export function deleteTriggerResponse(db: Database.Database, id: number): boolean {
   return db.prepare('DELETE FROM trigger_responses WHERE id = ?').run(id).changes > 0;
+}
+
+export function deleteTriggerResponsesByIds(db: Database.Database, ids: number[]): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const result = db.prepare(`DELETE FROM trigger_responses WHERE id IN (${placeholders})`).run(...ids);
+  return result.changes;
 }
 
 export function updateTriggerResponse(db: Database.Database, id: number, data: { trigger_text?: string; response_text?: string; case_sensitive?: number; enabled?: number }): boolean {
@@ -210,6 +218,37 @@ export interface DbFirstJoinPlayer {
   first_join_at: number;
   gift_claimed: number;
   gift_claimed_at: number | null;
+}
+
+export interface DbChatFeatureToggle {
+  feature_key: string;
+  enabled: number;
+  keywords: string;
+  updated_at: number;
+}
+
+export function getFeatureToggles(db: Database.Database): DbChatFeatureToggle[] {
+  return db.prepare('SELECT * FROM chat_feature_toggles ORDER BY feature_key').all() as DbChatFeatureToggle[];
+}
+
+export function getFeatureToggle(db: Database.Database, featureKey: string): DbChatFeatureToggle | null {
+  const row = db.prepare('SELECT * FROM chat_feature_toggles WHERE feature_key = ?').get(featureKey);
+  return (row as DbChatFeatureToggle) || null;
+}
+
+export function updateFeatureToggle(db: Database.Database, featureKey: string, data: { enabled?: number; keywords?: string }): boolean {
+  const sets: string[] = [];
+  const params: Record<string, unknown> = { featureKey };
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined && value !== null) {
+      sets.push(`${key} = @${key}`);
+      params[key] = value;
+    }
+  }
+  if (sets.length === 0) return false;
+  sets.push('updated_at = @updated_at');
+  params.updated_at = Math.floor(Date.now() / 1000);
+  return db.prepare(`UPDATE chat_feature_toggles SET ${sets.join(', ')} WHERE feature_key = @featureKey`).run(params).changes > 0;
 }
 
 export function listFirstJoinPlayers(db: Database.Database): DbFirstJoinPlayer[] {

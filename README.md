@@ -193,3 +193,32 @@ Factorio 进程通过 `detached: true` 启动。开发环境（tsx watch）下 `
 - 数据库目录 `data/` 需要写入权限
 - 存档目录需要读取/写入权限
 - Factorio 二进制文件需要执行权限
+
+### 原生模块编译
+
+本项目使用 `better-sqlite3` 和 `bcrypt` 等原生 Node.js 模块，这些模块需要在安装时针对特定的 Node.js 版本进行编译。
+
+**常见问题**：切换 Node.js 版本后，可能遇到以下错误：
+
+```
+Module did not self-register: '.../node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+```
+
+**解决方案**：
+
+```bash
+# 方案1: 重新安装原生模块
+npm install better-sqlite3 bcrypt
+
+# 方案2: 清理后完整重新安装
+rm -rf node_modules
+npm install
+
+# 方案3: 重新编译原生模块
+npm rebuild better-sqlite3 bcrypt
+```
+
+**建议**：
+- 生产环境使用固定 Node.js 版本（项目根目录有 `.node-version` 文件）
+- 使用 `npm install` 而非 `npm ci` 安装依赖，确保原生模块重新编译
+- 如遇编译失败，确保已安装编译工具：`apt install build-essential`（Linux）或对应的构建工具

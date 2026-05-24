@@ -8,7 +8,7 @@ export const createVipLevelSchema = z.object({
   daily_purchase_limit: z.number().int().min(1).optional().default(5),
   single_purchase_limit: z.number().int().min(1).optional().default(10),
   max_quality_level: z.number().int().min(1).max(5).optional().default(1),
-  features: z.array(z.string()).optional().default([]),
+  features: z.array(z.any()).optional().default([]),
   sort_order: z.number().int().optional().default(0),
 });
 
@@ -19,7 +19,7 @@ export const updateVipLevelSchema = z.object({
   daily_purchase_limit: z.number().int().min(1).optional(),
   single_purchase_limit: z.number().int().min(1).optional(),
   max_quality_level: z.number().int().min(1).max(5).optional(),
-  features: z.array(z.string()).optional(),
+  features: z.array(z.any()).optional(),
   sort_order: z.number().int().optional(),
   is_active: z.number().int().min(0).max(1).optional(),
 });

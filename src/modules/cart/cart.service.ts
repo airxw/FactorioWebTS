@@ -1,5 +1,6 @@
 import { getDb } from '../../lib/database.js';
 import * as repo from './cart.repository.js';
+import * as shopRepo from '../shop/shop.repository.js';
 
 export function getCart(userId: number): repo.CartItemWithDetails[] {
   const db = getDb();
@@ -16,6 +17,8 @@ export function syncCart(
     repo.deleteCartByUserId(db, userId);
 
     for (const item of items) {
+      const shopItem = shopRepo.findItemById(db, item.item_id);
+      if (!shopItem || !shopItem.is_active) continue;
       repo.insertCartItem(db, {
         user_id: userId,
         item_id: item.item_id,

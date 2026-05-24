@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const triggerResponseSchema = z.object({
+  type: z.enum(['vote_kick', 'server_info', 'ping', 'restart_warning', 'item_request', 'custom']).optional().default('custom'),
   trigger_text: z.string().min(1),
   response_text: z.string().optional().default(''),
   case_sensitive: z.coerce.number().int().min(0).max(1).optional().default(0),
@@ -36,8 +37,14 @@ export const playerEventSchema = z.object({
   target: z.string().optional().default(''),
 });
 
+export const featureToggleSchema = z.object({
+  enabled: z.number().int().min(0).max(1),
+  keywords: z.string().optional(),
+});
+
 export type TriggerResponseInput = z.infer<typeof triggerResponseSchema>;
 export type ServerResponseInput = z.infer<typeof serverResponseSchema>;
 export type PeriodicMessageInput = z.infer<typeof periodicMessageSchema>;
 export type ChatSettingsInput = z.infer<typeof chatSettingsSchema>;
 export type PlayerEventInput = z.infer<typeof playerEventSchema>;
+export type FeatureToggleInput = z.infer<typeof featureToggleSchema>;

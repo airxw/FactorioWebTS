@@ -293,6 +293,19 @@ export function updateOrderStatus(
     .run(params).changes > 0;
 }
 
+export function deleteOrdersByIds(
+  db: Database.Database,
+  ids: number[],
+  userId: number
+): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const result = db
+    .prepare(`DELETE FROM orders WHERE id IN (${placeholders}) AND user_id = ?`)
+    .run(...ids, userId);
+  return result.changes;
+}
+
 export function findOrdersWithItems(
   db: Database.Database,
   options?: { userId?: number; status?: string; search?: string; limit?: number; offset?: number }

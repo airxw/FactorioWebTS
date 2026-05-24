@@ -6,6 +6,7 @@ import {
   serverResponseSchema,
   periodicMessageSchema,
   playerEventSchema,
+  featureToggleSchema,
 } from './chat.schema.js';
 
 export default async function chatRoutes(app: FastifyInstance) {
@@ -18,6 +19,23 @@ export default async function chatRoutes(app: FastifyInstance) {
     const body = request.body as Record<string, unknown> || {};
     service.saveChatSettings(body);
     return reply.send({ success: true, message: 'Chat settings saved' });
+  });
+
+  app.get('/api/chat/feature-toggles', { preHandler: [authenticate, requireAdmin] }, async (_request, reply) => {
+    return reply.send({ success: true, data: service.getFeatureToggles() });
+  });
+
+  app.put('/api/chat/feature-toggles/:featureKey', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
+    const { featureKey } = request.params as { featureKey: string };
+    const parsed = featureToggleSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ success: false, error: parsed.error.errors[0].message });
+    try {
+      service.updateFeatureToggle(featureKey, parsed.data);
+      return reply.send({ success: true, message: 'Feature toggle updated' });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
   });
 
   app.get('/api/chat/trigger-responses', { preHandler: [authenticate, requireAdmin] }, async (_request, reply) => {
@@ -36,6 +54,20 @@ export default async function chatRoutes(app: FastifyInstance) {
     try {
       service.deleteTriggerResponse(parseInt(id, 10));
       return reply.send({ success: true, message: 'Deleted' });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message: string };
+      return reply.status(err.statusCode || 500).send({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/chat/trigger-responses/batch-delete', { preHandler: [authenticate, requireAdmin] }, async (request, reply) => {
+    const { ids } = request.body as { ids: number[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.status(400).send({ success: false, error: 'ids must be a non-empty array' });
+    }
+    try {
+      const count = service.deleteTriggerResponsesBatch(ids);
+      return reply.send({ success: true, message: `Deleted ${count} responses`, deleted: count });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message: string };
       return reply.status(err.statusCode || 500).send({ success: false, error: err.message });

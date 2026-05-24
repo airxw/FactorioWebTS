@@ -37,6 +37,7 @@
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <h3 class="card-title">商品列表</h3>
                                 <div class="shop-header-controls">
+                                    <input type="text" x-model="itemSearch" @input="itemPage=1" class="form-control" placeholder="搜索商品..." style="max-width:160px;">
                                     <!-- [价格显示开关] 暂时隐藏，恢复时移除 x-show="false" 即可 -->
                                     <label class="shop-price-toggle" title="显示/隐藏价格" x-show="false">
                                         <input type="checkbox" x-model="showPrice" @change="savePricePref()">
@@ -49,16 +50,21 @@
                                         <option :value="4">传说</option>
                                         <option :value="5">神话</option>
                                     </select>
-                                    <select x-model="selectedCategory" class="form-control" style="max-width:160px;">
+                                    <select x-model="selectedCategory" @change="itemPage=1" class="form-control" style="max-width:160px;">
                                         <option value="">全部分类</option>
                                         <template x-for="c in categories" :key="c"><option :value="c" x-text="catLabel(c)"></option></template>
+                                    </select>
+                                    <select x-model.number="itemPageSize" @change="itemPage=1" class="form-control" style="max-width:100px;">
+                                        <option :value="12">12条/页</option>
+                                        <option :value="24">24条/页</option>
+                                        <option :value="36">36条/页</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="card-body">
                                 <div class="item-grid">
-                                    <div x-show="displayItems.length === 0" class="loading">暂无商品</div>
-                                    <template x-for="item in displayItems" :key="item.id">
+                                    <div x-show="paginatedItems.length === 0" class="loading">暂无商品</div>
+                                    <template x-for="item in paginatedItems" :key="item.id">
                                         <div class="shop-item" :class="{ 'item-disabled': !item.enabled }">
                                             <div class="shop-item-row">
                                                 <div class="shop-item-name" x-text="item.name_cn || item.code"></div>
@@ -72,6 +78,15 @@
                                         </div>
                                     </template>
                                 </div>
+                                <template x-if="displayItems.length > itemPageSize">
+                                <div style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-top:16px;border-top:1px solid var(--border-color);">
+                                    <span style="font-size:13px;color:var(--color-text-secondary);">共 <span x-text="displayItems.length"></span> 个商品，第 <span x-text="itemPage"></span>/<span x-text="totalPages"></span> 页</span>
+                                    <div style="display:flex;gap:4px;">
+                                        <button class="btn btn-sm btn-secondary" :disabled="itemPage <= 1" @click="itemPage--;">上一页</button>
+                                        <button class="btn btn-sm btn-secondary" :disabled="itemPage >= totalPages" @click="itemPage++;">下一页</button>
+                                    </div>
+                                </div>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -127,6 +142,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h3 class="card-title">我的订单</h3>
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+                            <button class="btn btn-sm btn-danger" @click="deleteSelectedOrders()" x-show="selectedOrderIds.length > 0">删除选中 (<span x-text="selectedOrderIds.length"></span>)</button>
                             <input type="text" x-model="orderSearch" @keydown.enter="orderPage=1;loadOrders()" class="form-control" placeholder="搜索订单号/商品/玩家" style="max-width:180px;display:inline-block;">
                             <button class="btn btn-sm btn-secondary" @click="orderPage=1;loadOrders()">搜索</button>
                             <select x-model="orderStatusFilter" @change="orderPage=1;loadOrders()" class="form-control" style="max-width:120px;display:inline-block;">
@@ -143,21 +159,22 @@
                     <div class="card-body">
                         <div class="table-responsive">
                             <table class="table">
-                                <thead><tr><th>订单号</th><th>商品</th><th>数量</th><th>品质</th><th>提货码</th><th>总价</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+                                <thead><tr><th style="width:36px;"><input type="checkbox" @change="toggleSelectAllOrders()" :checked="allOrdersSelected"></th><th>订单号</th><th>商品</th><th>数量</th><th>品质</th><th>提货码</th><th>总价</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
                                 <tbody>
-                                    <tr x-show="orders.length === 0"><td colspan="9" class="text-center">暂无订单</td></tr>
+                                    <tr x-show="orders.length === 0"><td colspan="10" class="text-center">暂无订单</td></tr>
                                     <template x-for="o in orders" :key="o.order_id || o.order_number">
                                         <tr>
+                                            <td><input type="checkbox" @change="toggleOrderSelect(o.order_id)" :checked="selectedOrderIds.indexOf(o.order_id) > -1"></td>
                                             <td><code x-text="o.order_number || '-'"></code></td>
-                                            <td x-text="o.item_name"></td>
-                                            <td x-text="o.quantity"></td>
-                                            <td x-text="o.quality_level ?? '-'"></td>
+                                            <td x-text="o.item_name + (o.is_batch ? ' (' + o.quantity + '件)' : '')"></td>
+                                            <td x-text="o.is_batch ? '-' : o.quantity"></td>
+                                            <td x-text="o.is_batch ? '-' : (o.quality_level ?? '-')"></td>
                                             <td><template x-if="o.cdk_code"><code style="font-size:1.05em;letter-spacing:1px;color:var(--color-success,#28a745)" x-text="o.cdk_code"></code></template><template x-if="!o.cdk_code"><span style="color:var(--color-text-secondary)">-</span></template></td>
                                             <td x-text="'¥' + (o.total_price || 0)"></td>
                                             <td><span class="badge" :class="orderStatusClass(o.status)" x-text="orderStatusText(o.status)"></span></td>
                                             <td x-text="formatTs(o.created_at)"></td>
                                             <td>
-                                                <button class="btn btn-sm btn-danger" @click="cancelOrder(o.order_id)" x-show="o.status === 'pending'">取消</button>
+                                                <button class="btn btn-sm btn-danger" @click="deleteOrder(o.order_id)">删除</button>
                                             </td>
                                         </tr>
                                     </template>
@@ -211,26 +228,30 @@
                     <div class="price-summary-row">商品数 <span x-text="cart.length"></span></div>
                 </div>
                 <div x-show="checkoutError" class="text-danger" style="margin-bottom:var(--spacing-md);font-size:var(--font-size-sm);" x-text="checkoutError"></div>
-                <div x-show="directResult" class="cdk-result-box" style="background:var(--color-success-bg,#d4edda);border:2px solid var(--color-success,#28a745);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md);text-align:center">
+                <div x-show="directResult" class="cdk-result-box" style="background:var(--color-success-bg);border:2px solid var(--color-success-border);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md);text-align:center">
                     <div style="font-weight:700;margin-bottom:4px">物品已直接发送！</div>
                     <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:4px">物品已发送到角色 <strong x-text="boundGameId"></strong>，请在游戏中查收</div>
                 </div>
-                <div x-show="cdkResult" class="cdk-result-box" style="background:var(--color-success-bg,#d4edda);border:2px solid var(--color-success,#28a745);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md);text-align:center">
+                <div x-show="cdkCombined" class="cdk-result-box" style="background:var(--color-success-bg);border:2px solid var(--color-success-border);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md);text-align:center">
                     <div style="font-weight:700;margin-bottom:4px">提货码已生成！</div>
-                    <div style="font-size:1.25rem;font-family:monospace;letter-spacing:2px" x-text="cdkResult"></div>
-                    <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:8px">在游戏聊天中输入 <code style="background:#333;color:#fff;padding:2px 6px;border-radius:3px">!claim <span x-text="cdkResult"></span></code> 即可提货</div>
+                    <div style="font-size:1.5rem;font-family:var(--font-mono,monospace);letter-spacing:3px;color:var(--primary-color)" x-text="cdkCombined"></div>
+                    <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:8px">在游戏聊天中输入 <code style="background:var(--color-surface);color:var(--primary-color);padding:2px 6px;border-radius:3px;border:1px solid var(--color-border)">!claim <span x-text="cdkCombined"></span></code> 即可提货</div>
                 </div>
-                <div x-show="cdkList.length > 0" class="cdk-result-box" style="background:var(--color-success-bg,#d4edda);border:2px solid var(--color-success,#28a745);border-radius:8px;padding:var(--spacing-md);margin-bottom:var(--spacing-md)">
-                    <div style="font-weight:700;margin-bottom:8px">提货码已生成！共 <span x-text="cdkList.length"></span> 个：</div>
-                    <template x-for="code in cdkList">
-                        <div style="font-size:0.95rem;font-family:monospace;letter-spacing:2px;margin-bottom:4px" x-text="code"></div>
-                    </template>
-                    <div style="font-size:var(--font-size-sm);color:var(--color-text-secondary);margin-top:8px">在游戏聊天中逐个输入 <code style="background:#333;color:#fff;padding:2px 6px;border-radius:3px">!claim &lt;提货码&gt;</code> 即可提货</div>
-                </div>
+                <template x-if="!showCopyBtn && !directResult">
                 <button class="btn btn-primary w-100" @click="submitCheckout()" :disabled="submitting">
                     <span x-show="!submitting">确认购买</span>
                     <span x-show="submitting">提交中...</span>
                 </button>
+                </template>
+                <template x-if="showCopyBtn">
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-primary" style="flex:1;" @click="copyCdkCode()">复制提货码</button>
+                    <button class="btn btn-secondary" @click="showCheckout = false">关闭</button>
+                </div>
+                </template>
+                <template x-if="directResult">
+                <button class="btn btn-secondary w-100" @click="showCheckout = false">关闭</button>
+                </template>
             </div>
         </div>
     </div>
@@ -303,15 +324,16 @@
         orderPage: 1,
         orderPageSize: 10,
         orderTotal: 0,
+        selectedOrderIds: [],
         vipLevels: [],
         showCheckout: false,
         deliveryMethod: 'cdk',
         boundGameId: '',
         checkoutError: '',
-        cdkResult: '',
-        cdkList: [],
+        cdkCombined: '',
         directResult: false,
         submitting: false,
+        showCopyBtn: false,
         syncing: false,
         showRequestModal: false,
         requestItemId: '',
@@ -321,9 +343,17 @@
         requestError: '',
         requestSubmitting: false,
         selectedQualities: {},
+        itemPage: 1,
+        itemPageSize: 12,
+        itemSearch: '',
+
+        syncCartAbortController: null,
 
         async syncCart() {
-          if (this.syncing) return;
+          if (this.syncCartAbortController) {
+            this.syncCartAbortController.abort();
+          }
+          this.syncCartAbortController = new AbortController();
           this.syncing = true;
           try {
             var body = JSON.stringify({
@@ -334,9 +364,14 @@
             await fetchAPI('/api/cart', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: body
+              body: body,
+              signal: this.syncCartAbortController.signal
             });
-          } catch(e) { this.showToast('同步购物车失败', 'error'); }
+          } catch(e) {
+            if (e.name !== 'AbortError') {
+              this.showToast('同步购物车失败', 'error');
+            }
+          }
           finally { this.syncing = false; }
         },
 
@@ -375,8 +410,26 @@
         },
 
         get displayItems() {
-          if (!this.selectedCategory) return this.items.filter(function(i) { return i.enabled; });
-          return this.items.filter(function(i) { return i.enabled && i.category === this.selectedCategory; }.bind(this));
+          var items = this.items.filter(function(i) { return i.enabled; });
+          if (this.selectedCategory) items = items.filter(function(i) { return i.category === this.selectedCategory; }.bind(this));
+          if (this.itemSearch) {
+            var s = this.itemSearch.toLowerCase();
+            items = items.filter(function(i) {
+              return (i.code && i.code.toLowerCase().indexOf(s) !== -1) ||
+                     (i.name_cn && i.name_cn.toLowerCase().indexOf(s) !== -1) ||
+                     (i.name && i.name.toLowerCase().indexOf(s) !== -1);
+            });
+          }
+          return items;
+        },
+
+        get totalPages() {
+          return Math.ceil(this.displayItems.length / this.itemPageSize) || 1;
+        },
+
+        get paginatedItems() {
+          var start = (this.itemPage - 1) * this.itemPageSize;
+          return this.displayItems.slice(start, start + this.itemPageSize);
         },
 
         get cartTotal() {
@@ -390,6 +443,7 @@
             var data = await res.json();
             if (!data.success) throw new Error('Items API failed: ' + data.error);
             this.items = data.data || [];
+            this.itemPage = 1;
             var cats = {};
             this.items.forEach(function(i) { if (i.category) cats[i.category] = true; });
             this.categories = Object.keys(cats);
@@ -411,6 +465,7 @@
             var res = await fetchAPI(url);
             var data = await res.json();
             this.orders = (data.success && data.data) ? data.data : [];
+            this.selectedOrderIds = [];
             this.orderTotal = data.total || 0;
             this.orderPage = data.page || 1;
           } catch(e) { this.showToast('加载订单失败', 'error'); }
@@ -424,12 +479,12 @@
           } catch(e) { this.showToast('加载VIP等级失败', 'error'); }
         },
 
-        addToCart(item, quality) {
+        async addToCart(item, quality) {
           var q = quality != null ? Number(quality) : (item.quality_level || 0);
           var existing = this.cart.find(function(ci) { return ci.item.id === item.id && ci.quality === q; });
           if (existing) { existing.quantity++; }
           else { this.cart.push({ item: item, quantity: 1, quality: q }); }
-          this.syncCart();
+          await this.syncCart();
           this.showToast('已加入购物车', 'success');
         },
 
@@ -437,9 +492,9 @@
           if (this.cart.length === 0) { this.showToast('购物车为空', 'warning'); return; }
           this.showCheckout = true;
           this.checkoutError = '';
-          this.cdkResult = '';
-          this.cdkList = [];
+          this.cdkCombined = '';
           this.directResult = false;
+          this.showCopyBtn = false;
           if (!this.boundGameId) { this.deliveryMethod = 'cdk'; }
         },
 
@@ -460,9 +515,9 @@
           }
           this.submitting = true;
           this.checkoutError = '';
-          this.cdkResult = '';
-          this.cdkList = [];
+          this.cdkCombined = '';
           this.directResult = false;
+          this.showCopyBtn = false;
 
           try {
             if (this.cart.length === 1) {
@@ -481,10 +536,11 @@
                 if (data.data.delivery_method === 'direct') {
                   this.directResult = true;
                 } else {
-                  this.cdkResult = data.data.code;
+                  this.cdkCombined = data.data.code;
+                  this.showCopyBtn = true;
                 }
                 this.cart = []; this.loadOrders();
-                this.syncCart();
+                await this.syncCart();
               } else { this.checkoutError = data.error || '提交失败'; }
             } else {
               var self = this;
@@ -498,24 +554,85 @@
                 if (data.data.delivery_method === 'direct') {
                   this.directResult = true;
                 } else {
-                  this.cdkList = data.data.codes;
+                  this.cdkCombined = data.data.code;
+                  this.showCopyBtn = true;
                 }
                 this.cart = []; this.loadOrders();
-                this.syncCart();
+                await this.syncCart();
               } else { this.checkoutError = data.error || '提交失败'; }
             }
           } catch(e) { this.checkoutError = e.message || '提交失败'; }
           finally { this.submitting = false; }
         },
 
-        async cancelOrder(id) {
-          var confirmed = await window.showConfirm({ title: '取消订单', content: '确定取消这个订单吗？', danger: true });
+        copyCdkCode() {
+          var code = this.cdkCombined;
+          if (!code) return;
+          navigator.clipboard.writeText(code).then(function() {
+            this.showToast('提货码已复制', 'success');
+          }.bind(this)).catch(function() {
+            var ta = document.createElement('textarea');
+            ta.value = code;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            this.showToast('提货码已复制', 'success');
+          }.bind(this));
+        },
+
+        async deleteOrder(id) {
+          var confirmed = await window.showConfirm({ title: '删除订单', content: '确定删除这个订单吗？', danger: true });
           if (!confirmed) return;
           try {
-            var res = await fetchAPI('/api/shop/orders/' + id + '/cancel', { method: 'POST' });
+            var res = await fetchAPI('/api/shop/orders/' + id + '/delete', { method: 'POST' });
             var data = await res.json();
-            this.showToast(data.success ? '订单已取消' : (data.error || '取消失败'), data.success ? 'success' : 'error');
+            this.showToast(data.success ? '订单已删除' : (data.error || '删除失败'), data.success ? 'success' : 'error');
             if (data.success) this.loadOrders();
+          } catch(e) { this.showToast('网络错误', 'error'); }
+        },
+
+        toggleOrderSelect(orderId) {
+          var idx = this.selectedOrderIds.indexOf(orderId);
+          if (idx > -1) {
+            this.selectedOrderIds.splice(idx, 1);
+          } else {
+            this.selectedOrderIds.push(orderId);
+          }
+        },
+
+        toggleSelectAllOrders() {
+          var all = this.orders;
+          if (this.selectedOrderIds.length === all.length) {
+            this.selectedOrderIds = [];
+          } else {
+            this.selectedOrderIds = all.map(function(o) { return o.order_id; });
+          }
+        },
+
+        get allOrdersSelected() {
+          return this.orders.length > 0 && this.selectedOrderIds.length === this.orders.length;
+        },
+
+        async deleteSelectedOrders() {
+          if (this.selectedOrderIds.length === 0) {
+            this.showToast('请先选择要删除的订单', 'warning');
+            return;
+          }
+          var confirmed = await window.showConfirm({ title: '批量删除订单', content: '确定删除选中的 ' + this.selectedOrderIds.length + ' 个订单吗？', danger: true });
+          if (!confirmed) return;
+          try {
+            var res = await fetchAPI('/api/shop/orders/delete-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: this.selectedOrderIds })
+            });
+            var data = await res.json();
+            this.showToast(data.success ? data.message : (data.error || '删除失败'), data.success ? 'success' : 'error');
+            if (data.success) {
+              this.selectedOrderIds = [];
+              this.loadOrders();
+            }
           } catch(e) { this.showToast('网络错误', 'error'); }
         },
 

@@ -34,7 +34,7 @@ export function findCartByUserId(
       `SELECT ${cartFields},
               i.name, i.name_cn, i.code, i.price, i.category, i.stock
        FROM cart_items c
-       JOIN shop_items i ON c.item_id = i.id
+       JOIN shop_items i ON c.item_id = i.id AND i.is_active = 1
        WHERE c.user_id = ?
        ORDER BY c.created_at ASC`
     )

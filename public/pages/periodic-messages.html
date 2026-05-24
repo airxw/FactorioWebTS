@@ -78,92 +78,67 @@
         </div>
     </div>
 
-    <div class="modal-overlay" id="messageModal" style="display:none;">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="messageModalTitle">
-                        <i class="bi bi-plus-circle" style="color: var(--primary-color);"></i>添加周期消息
-                    </h5>
-                    <button type="button" class="modal-close" onclick="closeModal('messageModal')">&times;</button>
+    <div class="modal" id="messageModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="messageModalTitle">
+                    <i class="bi bi-plus-circle"></i>添加周期消息
+                </h3>
+                <button type="button" class="modal-close" onclick="closeMessageModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-message-id" value="">
+                <div class="mb-3">
+                    <label class="form-label">消息类型<span class="text-danger">*</span></label>
+                    <select class="form-control" id="msg-type" onchange="toggleItemType()">
+                        <option value="message">消息</option>
+                        <option value="item">物品</option>
+                    </select>
                 </div>
-                <div class="modal-body">
-                    <input type="hidden" id="edit-message-id" value="">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">消息类型 <span class="text-danger">*</span></label>
-                            <select class="form-control" id="msg-type" onchange="toggleItemType()">
-                                <option value="message">消息</option>
-                                <option value="item">物品</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">目标类型</label>
-                            <select class="form-control" id="msg-target">
-                                <option value="all">全部玩家</option>
-                                <option value="online">仅在线玩家</option>
-                            </select>
-                        </div>
-                    </div>
 
-                    <div class="mb-3" id="msg-content-group">
-                        <label class="form-label">消息内容 <span class="text-danger">*</span></label>
-                        <textarea class="form-control" id="msg-content" rows="3" placeholder="输入要定时发送的消息内容..."></textarea>
-                    </div>
+                <div class="mb-3">
+                    <label class="form-label">目标类型</label>
+                    <select class="form-control" id="msg-target">
+                        <option value="all">全部玩家</option>
+                        <option value="online">仅在线玩家</option>
+                    </select>
+                </div>
 
-                    <div id="msg-item-group" style="display: none;">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">物品代码 <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="msg-item-code" placeholder="如 iron-plate">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">物品数量 <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="msg-item-count" value="1" min="1">
-                            </div>
-                        </div>
-                    </div>
+                <div class="mb-3" id="msg-content-group">
+                    <label class="form-label">消息内容<span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="msg-content" rows="3" placeholder="输入要定时发送的消息内容..."></textarea>
+                </div>
 
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">间隔类型</label>
-                            <select class="form-control" id="msg-interval-type">
-                                <option value="seconds">秒</option>
-                                <option value="minutes">分钟</option>
-                                <option value="hours">小时</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">间隔值 <span class="text-danger">*</span></label>
-                            <input type="number" class="form-control" id="msg-interval-value" value="30" min="1" placeholder="间隔数值">
-                        </div>
+                <div id="msg-item-group" style="display: none;">
+                    <div class="mb-3">
+                        <label class="form-label">物品代码<span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="msg-item-code" placeholder="如 iron-plate">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">物品数量<span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" id="msg-item-count" value="1" min="1">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('messageModal')">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="saveMessage()">
-                        <i class="bi bi-check-lg me-1"></i>保存
-                    </button>
+
+                <div class="mb-3">
+                    <label class="form-label">间隔类型</label>
+                    <select class="form-control" id="msg-interval-type">
+                        <option value="seconds">秒</option>
+                        <option value="minutes">分钟</option>
+                        <option value="hours">小时</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">间隔值<span class="text-danger">*</span></label>
+                    <input type="number" class="form-control" id="msg-interval-value" value="30" min="1" placeholder="间隔数值">
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="deleteModal" style="display:none;">
-        <div class="modal-dialog modal-sm modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-body text-center py-4">
-                    <i class="bi bi-exclamation-triangle-fill" style="font-size: 2.5rem; color: var(--warning-color);"></i>
-                    <h5 class="mt-3 mb-2" style="color: var(--dark-color);">确认删除</h5>
-                    <p style="color: var(--gray-color); margin-bottom: 0;">确定要删除这条周期消息吗？此操作不可撤销。</p>
-                    <input type="hidden" id="delete-message-id" value="">
-                </div>
-                <div class="modal-footer justify-content-center">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteModal')">取消</button>
-                    <button type="button" class="btn btn-danger" onclick="confirmDelete()">
-                        <i class="bi bi-trash me-1"></i>删除
-                    </button>
-                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeMessageModal()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveMessage()">
+                    <i class="bi bi-check-lg me-1"></i>保存
+                </button>
             </div>
         </div>
     </div>
@@ -178,14 +153,6 @@
     <script src="/js/tooltip.js"></script>
     <script>
         var messageList = [];
-
-        function openModal(id) {
-            document.getElementById(id).style.display = 'flex';
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).style.display = 'none';
-        }
 
         document.addEventListener('DOMContentLoaded', function() {
             checkSession({
@@ -202,7 +169,19 @@
                     loadMessages();
                 }
             });
+
+            document.getElementById('messageModal').addEventListener('click', function(e) {
+                if (e.target === this) closeMessageModal();
+            });
         });
+
+        function openMessageModal() {
+            document.getElementById('messageModal').style.display = 'block';
+        }
+
+        function closeMessageModal() {
+            document.getElementById('messageModal').style.display = 'none';
+        }
 
         async function loadMessages() {
             try {
@@ -296,7 +275,7 @@
 
         function openAddModal() {
             document.getElementById('edit-message-id').value = '';
-            document.getElementById('messageModalTitle').innerHTML = '<i class="bi bi-plus-circle" style="color: var(--primary-color);"></i>添加周期消息';
+            document.getElementById('messageModalTitle').innerHTML = '<i class="bi bi-plus-circle"></i>添加周期消息';
             document.getElementById('msg-type').value = 'message';
             document.getElementById('msg-content').value = '';
             document.getElementById('msg-item-code').value = '';
@@ -305,7 +284,7 @@
             document.getElementById('msg-interval-value').value = '30';
             document.getElementById('msg-target').value = 'all';
             toggleItemType();
-            openModal('messageModal');
+            openMessageModal();
         }
 
         function openEditModal(id) {
@@ -313,7 +292,7 @@
             if (!msg) return;
 
             document.getElementById('edit-message-id').value = msg.id;
-            document.getElementById('messageModalTitle').innerHTML = '<i class="bi bi-pencil" style="color: var(--primary-color);"></i>编辑周期消息';
+            document.getElementById('messageModalTitle').innerHTML = '<i class="bi bi-pencil"></i>编辑周期消息';
             document.getElementById('msg-type').value = isItemType(msg.type) ? 'item' : 'message';
             document.getElementById('msg-content').value = msg.content || '';
             document.getElementById('msg-item-code').value = msg.item_code || '';
@@ -323,7 +302,7 @@
             document.getElementById('msg-target').value = msg.target || 'all';
             toggleItemType();
 
-            openModal('messageModal');
+            openMessageModal();
         }
 
         async function saveMessage() {
@@ -369,7 +348,7 @@
                 });
                 var result = await response.json();
                 if (result.success) {
-                    closeModal('messageModal');
+                    closeMessageModal();
                     showToast(editId ? '消息已更新' : '消息已添加', 'success');
                     loadMessages();
                 } else {
@@ -402,23 +381,28 @@
         }
 
         function openDeleteModal(id) {
-            document.getElementById('delete-message-id').value = id;
-            openModal('deleteModal');
+            showModal({
+                title: '确认删除',
+                content: '确定要删除这条周期消息吗？此操作不可恢复。',
+                confirmText: '删除',
+                danger: true,
+                onConfirm: function() {
+                    confirmDelete(id);
+                }
+            });
         }
 
-        async function confirmDelete() {
-            var id = document.getElementById('delete-message-id').value;
+        async function confirmDelete(id) {
             try {
                 var response = await fetchAPI('/api/chat/periodic-messages/' + id, {
                     method: 'DELETE'
                 });
                 var result = await response.json();
                 if (result.success) {
-                    closeModal('deleteModal');
                     showToast('消息已删除', 'success');
                     loadMessages();
                 } else {
-                    showToast('删除失败: ' + (result.error || result.message || '未知错误'), 'error');
+                    showToast('删除失败: ' + (result.error || '未知错误'), 'error');
                 }
             } catch (e) {
                 showToast('删除失败: ' + e.message, 'error');
