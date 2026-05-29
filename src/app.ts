@@ -48,6 +48,7 @@ export async function buildApp() {
           ? { target: 'pino-pretty', options: { colorize: true } }
           : undefined,
     },
+    bodyLimit: 104857600,
   });
 
   await registerCors(app);
